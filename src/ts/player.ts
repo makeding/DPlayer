@@ -1,4 +1,5 @@
 import * as aribb24js from 'aribb24.js';
+import * as aribb62js from 'aribb62.js';
 
 import utils from './utils';
 import handleOption from './options';
@@ -223,6 +224,51 @@ class DPlayer {
                 this.notice(this.tran('Synchronized'));
             }
         }
+    }
+
+    initARIBB62Subtitle(video: HTMLVideoElement, mpegtsPlayer: {on(event: string, listener: (data: unknown) => void): void}): void {
+        if (!this.options.subtitle || this.options.subtitle.type !== 'aribb62') {
+            return;
+        }
+
+        const subtitleEvent = 'MMTS_SUBTITLE_DATA_ARRIVED';
+        const mpegtsEvents = window.mpegts!.Events as unknown as Record<string, string>;
+        if (!Object.prototype.hasOwnProperty.call(mpegtsEvents, subtitleEvent)) {
+            this.notice('Error: mpegts.js does not expose MMTS subtitle events.', undefined, undefined, '#FF6F6A');
+            return;
+        }
+
+        if (this.plugins.aribb62) {
+            this.plugins.aribb62.renderer.destroy();
+            this.plugins.aribb62.overlay.remove();
+            delete this.plugins.aribb62;
+        }
+
+        const overlay = document.createElement('div');
+        overlay.className = 'dplayer-aribb62-subtitle';
+        overlay.style.position = 'absolute';
+        overlay.style.inset = '0';
+        overlay.style.pointerEvents = 'none';
+        overlay.style.overflow = 'hidden';
+        this.template.videoWrap.appendChild(overlay);
+
+        const renderer = new aribb62js.B62TTMLRenderer(Object.assign(
+            {},
+            this.options.pluginOptions.aribb62 || {},
+            {
+                mediaElement: video,
+                overlayElement: overlay,
+                isLive: this.options.live,
+            },
+        ));
+        this.plugins.aribb62 = {overlay, renderer};
+        renderer.render();
+
+        mpegtsPlayer.on(mpegtsEvents[subtitleEvent], (data: unknown) => {
+            if (this.plugins.aribb62) {
+                this.plugins.aribb62.renderer.push(data as aribb62js.B62TTMLPushData);
+            }
+        });
     }
 
     /**
@@ -668,6 +714,11 @@ class DPlayer {
                                     this.plugins.aribb24Superimpose.dispose();
                                     delete this.plugins.aribb24Superimpose;
                                 }
+                                if (this.plugins.aribb62) {
+                                    this.plugins.aribb62.renderer.destroy();
+                                    this.plugins.aribb62.overlay.remove();
+                                    delete this.plugins.aribb62;
+                                }
                                 this.plugins.mpegts.unload();
                                 this.plugins.mpegts.detachMediaElement();
                                 this.plugins.mpegts.destroy();
@@ -701,6 +752,11 @@ class DPlayer {
                                 if (this.plugins.aribb24Superimpose) {
                                     this.plugins.aribb24Superimpose.dispose();
                                     delete this.plugins.aribb24Superimpose;
+                                }
+                                if (this.plugins.aribb62) {
+                                    this.plugins.aribb62.renderer.destroy();
+                                    this.plugins.aribb62.overlay.remove();
+                                    delete this.plugins.aribb62;
                                 }
                                 mpegtsPlayer.unload();
                                 mpegtsPlayer.detachMediaElement();
@@ -744,6 +800,8 @@ class DPlayer {
                                     }
                                 });
                             }
+
+                            this.initARIBB62Subtitle(video, mpegtsPlayer);
                         } else {
                             this.notice('Error: mpegts.js is not supported.', undefined, undefined, '#FF6F6A');
                         }

@@ -1,0 +1,7 @@
+allowBuilds:
+  core-js: true
+  esbuild: true
+  fsevents: true
+  highlight.js: true
+  vuepress: false
+  yorkie: true

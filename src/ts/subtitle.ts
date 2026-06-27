@@ -54,6 +54,10 @@ class Subtitle {
         if (this.options.type === 'aribb24' && this.plugins.aribb24Caption) {
             this.plugins.aribb24Caption.show();
         }
+        if (this.options.type === 'aribb62' && this.plugins.aribb62) {
+            this.plugins.aribb62.overlay.classList.remove('dplayer-subtitle-hide');
+            this.plugins.aribb62.renderer.render();
+        }
         this.events.trigger('subtitle_show');
     }
 
@@ -64,6 +68,9 @@ class Subtitle {
         // if you want to disable the drawing of superimpose itself, options.plugins.aribb24.disableSuperimposeRenderer should be set to true.
         if (this.options.type === 'aribb24' && this.plugins.aribb24Caption) {
             this.plugins.aribb24Caption.hide();
+        }
+        if (this.options.type === 'aribb62' && this.plugins.aribb62) {
+            this.plugins.aribb62.overlay.classList.add('dplayer-subtitle-hide');
         }
         this.events.trigger('subtitle_hide');
     }

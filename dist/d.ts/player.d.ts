@@ -63,6 +63,9 @@ declare class DPlayer {
      * Sync video (live only)
      */
     sync(quiet?: boolean): void;
+    initARIBB62Subtitle(video: HTMLVideoElement, mpegtsPlayer: {
+        on(event: string, listener: (data: unknown) => void): void;
+    }): void;
     /**
      * Play video
      */

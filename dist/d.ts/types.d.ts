@@ -4,12 +4,13 @@ import FlvJs from 'flv.js';
 import * as dashjs from 'dashjs';
 import WebTorrent from 'webtorrent';
 import * as aribb24js from 'aribb24.js';
+import * as aribb62js from 'aribb62.js';
 import DPlayer from './player';
 export type Lang = 'en' | 'zh-cn' | 'zh-tw' | 'ja' | 'ja-jp';
 export type Preload = 'none' | 'metadata' | 'auto';
 export type CrossOrigin = 'anonymous' | 'use-credentials' | null;
 export type VideoType = 'auto' | 'hls' | 'mpegts' | 'flv' | 'dash' | 'webtorrent' | 'normal';
-export type SubtitleType = 'webvtt' | 'aribb24';
+export type SubtitleType = 'webvtt' | 'aribb24' | 'aribb62';
 export type Events = VideoEvents | PlayerEvents;
 export type VideoEvents = 'abort' | 'canplay' | 'canplaythrough' | 'durationchange' | 'emptied' | 'ended' | 'error' | 'loadeddata' | 'loadedmetadata' | 'loadstart' | 'mozaudioavailable' | 'pause' | 'play' | 'playing' | 'progress' | 'ratechange' | 'seeked' | 'seeking' | 'stalled' | 'suspend' | 'timeupdate' | 'volumechange' | 'waiting';
 export type PlayerEvents = 'screenshot' | 'thumbnails_show' | 'thumbnails_hide' | 'danmaku_show' | 'danmaku_hide' | 'danmaku_clear' | 'danmaku_load_start' | 'danmaku_load_end' | 'danmaku_send' | 'danmaku_opacity' | 'contextmenu_show' | 'contextmenu_hide' | 'notice_show' | 'notice_hide' | 'quality_start' | 'quality_end' | 'destroy' | 'resize' | 'fullscreen' | 'fullscreen_cancel' | 'webfullscreen' | 'webfullscreen_cancel' | 'subtitle_show' | 'subtitle_hide' | 'subtitle_change';
@@ -257,7 +258,7 @@ export interface Subtitle {
      */
     url?: string;
     /**
-     * @description subtitle export type, values: 'webvtt' | 'aribb24'
+     * @description subtitle export type, values: 'webvtt' | 'aribb24' | 'aribb62'
      * @default 'webvtt'
      */
     type?: SubtitleType;
@@ -352,6 +353,7 @@ export interface PluginOptions {
     aribb24?: aribb24js.CanvasRendererOption & {
         disableSuperimposeRenderer?: boolean;
     };
+    aribb62?: aribb62js.B62TTMLRendererOptions;
 }
 export interface WindowExtend extends Window {
     dashjs?: typeof dashjs;
@@ -438,6 +440,10 @@ export interface Plugins {
     webtorrent?: WebTorrent.Instance;
     aribb24Caption?: aribb24js.CanvasRenderer;
     aribb24Superimpose?: aribb24js.CanvasRenderer;
+    aribb62?: {
+        overlay: HTMLElement;
+        renderer: aribb62js.B62TTMLRenderer;
+    };
 }
 export interface APIBackendReadOptions {
     url?: string;

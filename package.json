@@ -41,6 +41,7 @@
     "dependencies": {
         "aribb24.js": "~1.11.5",
         "axios": "^1.7.2",
+        "aribb62.js": "^0.1.2",
         "balloon-css": "^1.2.0"
     },
     "devDependencies": {
@@ -70,7 +71,7 @@
         "hls.js": "^1.6.9",
         "mini-css-extract-plugin": "2.9.0",
         "minimatch": "^10.0.3",
-        "mpegts.js": "github:tsukumijima/mpegts.js#726d91becfa178a68bbea154175213ab6b3dfdba",
+        "mpegts.js": "github:makeding/mmts.js#6571a37b88cda207eee1c9296cd2897334441b87",
         "patch-package": "^7.0.2",
         "postcss": "^8.4.39",
         "postcss-loader": "^7.3.4",
@@ -79,6 +80,7 @@
         "source-map-loader": "^4.0.2",
         "style-loader": "^3.3.4",
         "svg-inline-loader": "0.8.2",
+        "terser-webpack-plugin": "^5.6.1",
         "ts-loader": "^9.5.1",
         "ts-migrate": "^0.1.35",
         "typescript": "~5.9.3",
