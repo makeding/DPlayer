@@ -40,7 +40,7 @@
     },
     "dependencies": {
         "aribb24.js": "~1.11.5",
-        "aribb62.js": "^0.1.4",
+        "aribb62.js": "file:../aribb62.js",
         "axios": "^1.7.2",
         "balloon-css": "^1.2.0"
     },
