@@ -71,7 +71,7 @@
         "hls.js": "^1.6.9",
         "mini-css-extract-plugin": "2.9.0",
         "minimatch": "^10.0.3",
-        "mpegts.js": "github:makeding/mmts.js#f17ea3c97405c7a380b4335c5b8665743b0e256b",
+        "mpegts.js": "github:makeding/mmts.js#19ba46b6d194325c2a9976052d9f62375d52c3fa",
         "patch-package": "^7.0.2",
         "postcss": "^8.4.39",
         "postcss-loader": "^7.3.4",
