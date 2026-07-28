@@ -40,7 +40,7 @@
     },
     "dependencies": {
         "aribb24.js": "~1.11.5",
-        "aribb62.js": "^0.1.5",
+        "aribb62.js": "^0.1.6",
         "axios": "^1.7.2",
         "balloon-css": "^1.2.0"
     },
@@ -71,7 +71,7 @@
         "hls.js": "^1.6.9",
         "mini-css-extract-plugin": "2.9.0",
         "minimatch": "^10.0.3",
-        "mpegts.js": "github:makeding/mmts.js#f6ca2b03356522ab47711e41210164a11f5d3ef7",
+        "mpegts.js": "github:makeding/mmts.js#f17ea3c97405c7a380b4335c5b8665743b0e256b",
         "patch-package": "^7.0.2",
         "postcss": "^8.4.39",
         "postcss-loader": "^7.3.4",
