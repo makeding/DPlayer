@@ -289,7 +289,7 @@ class DPlayer {
         this.template.mobilePlayButton.innerHTML = Icons.pause;
 
         // if live, sync video in advance
-        if (this.options.live && this.options.syncWhenPlayingLive) {
+        if (this.options.live && this.options.syncWhenPlayingLive && this.type !== 'tlv') {
             this.sync(true);
         }
 
@@ -304,7 +304,12 @@ class DPlayer {
                     // pass
                 });
         }
-        this.timer.enable('loading');
+        // TLV の読み込み・バッファリング状態は TLVPlayer / tlvdemux が単独で所有する。
+        // currentTime の停滞だけで状態を推測する DPlayer 共通の loading checker は、
+        // Range シーク直後や MSE のデコード待ちを誤ってバッファリング扱いするため介入させない。
+        if (this.type !== 'tlv') {
+            this.timer.enable('loading');
+        }
         this.container.classList.remove('dplayer-paused');
         this.container.classList.add('dplayer-playing');
         if (this.danmaku) {
