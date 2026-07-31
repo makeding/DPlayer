@@ -58,6 +58,9 @@ class Subtitle {
             this.plugins.aribb62.overlay.classList.remove('dplayer-subtitle-hide');
             this.plugins.aribb62.renderer.render();
         }
+        if (this.options.type === 'aribb62' && this.plugins.tlv) {
+            this.plugins.tlv.setSubtitleVisible(true);
+        }
         this.events.trigger('subtitle_show');
     }
 
@@ -71,6 +74,9 @@ class Subtitle {
         }
         if (this.options.type === 'aribb62' && this.plugins.aribb62) {
             this.plugins.aribb62.overlay.classList.add('dplayer-subtitle-hide');
+        }
+        if (this.options.type === 'aribb62' && this.plugins.tlv) {
+            this.plugins.tlv.setSubtitleVisible(false);
         }
         this.events.trigger('subtitle_hide');
     }

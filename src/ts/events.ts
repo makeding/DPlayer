@@ -59,6 +59,15 @@ class Events {
             'subtitle_show',
             'subtitle_hide',
             'subtitle_change',
+            'tlv_ready',
+            'tlv_error',
+            'tlv_tracks',
+            'tlv_track_change',
+            'tlv_broadcast_clock',
+            'tlv_event_info',
+            'tlv_application_state',
+            'tlv_application_resource',
+            'tlv_application_resources_reset',
         ];
     }
 

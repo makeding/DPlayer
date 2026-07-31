@@ -1,5 +1,6 @@
 import Hls, { HlsConfig } from 'hls.js';
 import Mpegts from 'mpegts.js';
+import type createTlvDemuxModule from 'tlvdemux';
 import FlvJs from 'flv.js';
 import * as dashjs from 'dashjs';
 import WebTorrent from 'webtorrent';
@@ -11,7 +12,7 @@ import DPlayer from './player';
 export type Lang = 'en' | 'zh-cn' | 'zh-tw' | 'ja' | 'ja-jp';
 export type Preload = 'none' | 'metadata' | 'auto';
 export type CrossOrigin = 'anonymous' | 'use-credentials' | null;
-export type VideoType = 'auto' | 'hls' | 'mpegts' | 'flv' | 'dash' | 'webtorrent' | 'normal';
+export type VideoType = 'auto' | 'hls' | 'mpegts' | 'tlv' | 'flv' | 'dash' | 'webtorrent' | 'normal';
 export type SubtitleType = 'webvtt' | 'aribb24' | 'aribb62';
 
 export type Events = VideoEvents | PlayerEvents;
@@ -64,7 +65,16 @@ export type PlayerEvents =
     'webfullscreen_cancel' |
     'subtitle_show' |
     'subtitle_hide' |
-    'subtitle_change';
+    'subtitle_change' |
+    'tlv_ready' |
+    'tlv_error' |
+    'tlv_tracks' |
+    'tlv_track_change' |
+    'tlv_broadcast_clock' |
+    'tlv_event_info' |
+    'tlv_application_state' |
+    'tlv_application_resource' |
+    'tlv_application_resources_reset';
 
 export type DanmakuType = 'top' | 'right' | 'bottom';
 export type DanmakuSize = 'big' | 'medium' | 'small';
@@ -326,6 +336,11 @@ export interface Video {
      * @description custom video export type implementation
      */
     customType?: {[key: string]: (video: HTMLVideoElement, player: DPlayer) => void};
+
+    /**
+     * @description MMT/TLV source information used when type is `tlv`
+     */
+    tlv?: TLVSourceOptions;
 }
 
 export interface VideoQuality {
@@ -343,6 +358,40 @@ export interface VideoQuality {
      * @description values: 'auto' | 'hls' | 'mpegts' | 'flv' | 'dash' | 'webtorrent' | 'normal' or other custom export type
      */
     type?: VideoType | string;
+
+    /**
+     * @description MMT/TLV source information used when type is `tlv`
+     */
+    tlv?: TLVSourceOptions;
+}
+
+export interface TLVSourceOptions {
+    /** Preferred MMTP video packet_id. The first HEVC track is used when omitted. */
+    videoPacketId?: number;
+    /** Exact byte size of a recorded source. Avoids an additional size probe. */
+    fileSize?: number;
+}
+
+export interface TLVOptions {
+    /** Additional fetch options. `signal` and Range headers remain player-owned. */
+    fetch?: Omit<RequestInit, 'signal' | 'headers'> & {headers?: HeadersInit};
+    /** Forward buffer high-water mark. */
+    forwardBufferSeconds?: number;
+    /** Back buffer retained in SourceBuffer. */
+    backBufferSeconds?: number;
+}
+
+export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
+export type TLVEventInfo = createTlvDemuxModule.EventInfo;
+export interface TLVPlugin {
+    readonly tracks: readonly TLVTrackInfo[];
+    selectVideoTrack(packetId: number): void;
+    selectAudioTrack(packetId: number): Promise<void>;
+    selectSubtitleTrack(packetId: number): void;
+    applicationEntry(contextId: number): string | null;
+    applications(): createTlvDemuxModule.ApplicationState[];
+    setSubtitleVisible(visible: boolean): void;
+    destroy(): void;
 }
 
 export interface Subtitle {
@@ -459,6 +508,7 @@ export interface PluginOptions {
         disableSuperimposeRenderer?: boolean;
     }
     aribb62?: aribb62js.B62TTMLRendererOptions;
+    tlv?: TLVOptions;
 }
 
 // ===== internal types =====
@@ -514,12 +564,14 @@ export interface VideoInternal {
     };
     type: VideoType | string;
     customType?: {[key: string]: (video: HTMLVideoElement, player: DPlayer) => void};
+    tlv?: TLVSourceOptions;
 }
 
 export interface VideoQualityInternal {
     name: string;
     url: string;
     type: VideoType | string;
+    tlv?: TLVSourceOptions;
 }
 
 export interface SubtitleInternal {
@@ -556,6 +608,7 @@ export interface Plugins {
         overlay: HTMLElement;
         renderer: aribb62js.B62TTMLRenderer;
     };
+    tlv?: TLVPlugin;
 }
 
 export interface APIBackendReadOptions {

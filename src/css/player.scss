@@ -21,6 +21,14 @@
         }
     }
 
+    .dplayer-tlv-media-plane {
+        position: absolute;
+        inset: 0;
+        display: grid;
+        overflow: hidden;
+        background: #000;
+    }
+
     &.dplayer-fulled, &.dplayer-fulled-browser {
         width: 100% !important;
         height: 100% !important;

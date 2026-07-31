@@ -20,6 +20,7 @@ import Comment from './comment';
 import HotKey from './hotkey';
 import ContextMenu from './contextmenu';
 import InfoPanel from './info-panel';
+import TLVPlayer from './tlv-player';
 import tplVideo from '../template/video.art';
 import defaultApiBackend from './api';
 import * as DPlayerType from './types';
@@ -422,6 +423,18 @@ class DPlayer {
         this.events.off(name, callback);
     }
 
+    selectTLVVideoTrack(packetId: number): void {
+        this.plugins.tlv?.selectVideoTrack(packetId);
+    }
+
+    selectTLVAudioTrack(packetId: number): Promise<void> {
+        return this.plugins.tlv?.selectAudioTrack(packetId) ?? Promise.resolve();
+    }
+
+    selectTLVSubtitleTrack(packetId: number): void {
+        this.plugins.tlv?.selectSubtitleTrack(packetId);
+    }
+
     /**
      * Switch to a new video
      *
@@ -521,6 +534,10 @@ class DPlayer {
     }
 
     initMSE(video: HTMLVideoElement, type: DPlayerType.VideoType | string): void {
+        if (this.plugins.tlv) {
+            this.plugins.tlv.destroy();
+            delete this.plugins.tlv;
+        }
         this.type = type;
         if (this.options.video.customType && this.options.video.customType[type]) {
             if (Object.prototype.toString.call(this.options.video.customType[type]) === '[object Function]') {
@@ -542,7 +559,7 @@ class DPlayer {
                     this.type = 'normal';
                 }
             }
-            if (!(this.type === 'mpegts')) {
+            if (!(this.type === 'mpegts' || this.type === 'tlv')) {
                 // audio switching is enabled only when using mpegts.js
                 this.container.classList.add('dplayer-no-audio-switching');
             }
@@ -809,6 +826,35 @@ class DPlayer {
                         this.notice('Error: Can\'t find mpegts.js.', undefined, undefined, '#FF6F6A');
                     }
                     break;
+                case 'tlv': {
+                    if (!('MediaSource' in window) || !window.fetch || !video.src) {
+                        this.notice('Error: MMT/TLV playback is not supported.', undefined, undefined, '#FF6F6A');
+                        break;
+                    }
+                    if (this.options.subtitle) this.options.subtitle.type = 'aribb62';
+                    const source = this.quality?.tlv ?? this.options.video.tlv ?? {};
+                    const tlvPlayer = new TLVPlayer({
+                        url: video.src,
+                        video,
+                        mediaPlane: this.template.tlvMediaPlane,
+                        live: this.options.live,
+                        source,
+                        options: this.options.pluginOptions.tlv ?? {},
+                        subtitleOptions: this.options.pluginOptions.aribb62,
+                        subtitleVisible: () => this.user.get('subtitle') !== 0 &&
+                            !this.template.subtitle.classList.contains('dplayer-subtitle-hide'),
+                        emit: (name, detail) => this.events.trigger(name, detail),
+                        notice: message => this.notice(`Error: ${message}`, undefined, undefined, '#FF6F6A'),
+                    });
+                    this.plugins.tlv = tlvPlayer;
+                    this.events.on('destroy', () => {
+                        if (this.plugins.tlv === tlvPlayer) {
+                            tlvPlayer.destroy();
+                            delete this.plugins.tlv;
+                        }
+                    });
+                    break;
+                }
                 // https://github.com/Bilibili/flv.js
                 case 'flv':
                     if (window.flvjs) {
@@ -923,7 +969,7 @@ class DPlayer {
             // quality switching failed
             if (this.switchingQuality) {
                 if (this.prevVideo !== null) {
-                    this.template.videoWrapAspect.removeChild(this.prevVideo);
+                    this.prevVideo.remove();
                 }
                 this.video.classList.add('dplayer-video-current');
                 this.prevVideo = null;
@@ -1016,7 +1062,7 @@ class DPlayer {
             crossOrigin: this.options.crossOrigin,
         });
         const videoEle = new DOMParser().parseFromString(videoHTML, 'text/html').body.firstChild as HTMLVideoElement;
-        this.template.videoWrapAspect.insertBefore(videoEle, this.template.videoWrapAspect.getElementsByTagName('div')[0]);
+        this.template.tlvMediaPlane.prepend(videoEle);
         this.prevVideoCurrentTime = this.video.currentTime;
         this.prevVideo = this.video;
         this.video = videoEle;
@@ -1050,7 +1096,7 @@ class DPlayer {
                     this.seek(this.prevVideoCurrentTime);
                     return;
                 }
-                this.template.videoWrapAspect.removeChild(this.prevVideo);
+                this.prevVideo.remove();
                 this.video.classList.add('dplayer-video-current');
                 if (!paused) {
                     this.video.play();

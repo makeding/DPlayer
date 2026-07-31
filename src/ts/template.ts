@@ -30,6 +30,7 @@ class Template {
     mobileForwardButton!: HTMLElement;
     videoWrap!: HTMLElement;
     videoWrapAspect!: HTMLElement;
+    tlvMediaPlane!: HTMLElement;
     controllerMask!: HTMLElement;
     ptime!: HTMLElement;
     settingButton!: HTMLElement;
@@ -145,6 +146,7 @@ class Template {
         this.mobileForwardButton = this.container.querySelector('.dplayer-mobile-icon-forward')!;
         this.videoWrap = this.container.querySelector('.dplayer-video-wrap')!;
         this.videoWrapAspect = this.container.querySelector('.dplayer-video-wrap-aspect')!;
+        this.tlvMediaPlane = this.container.querySelector('.dplayer-tlv-media-plane')!;
         this.controllerMask = this.container.querySelector('.dplayer-controller-mask')!;
         this.ptime = this.container.querySelector('.dplayer-ptime')!;
         this.settingButton = this.container.querySelector('.dplayer-setting-icon')!;

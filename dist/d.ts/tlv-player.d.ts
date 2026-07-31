@@ -1,0 +1,67 @@
+import * as aribb62js from 'aribb62.js';
+import createTlvDemuxModule from 'tlvdemux';
+import type * as DPlayerType from './types';
+type PlayerBridge = {
+    url: string;
+    video: HTMLVideoElement;
+    mediaPlane: HTMLElement;
+    live: boolean;
+    source: DPlayerType.TLVSourceOptions;
+    options: DPlayerType.TLVOptions;
+    subtitleOptions?: aribb62js.B62TTMLRendererOptions;
+    subtitleVisible: () => boolean;
+    emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
+    notice: (message: string) => void;
+};
+/** Browser MMT/TLV loader, demuxer, MSE bridge, subtitle renderer and receiver host. */
+export default class TLVPlayer implements DPlayerType.TLVPlugin {
+    readonly tracks: DPlayerType.TLVTrackInfo[];
+    private readonly bridge;
+    private module;
+    private demuxer;
+    private mediaSource;
+    private mediaUrl;
+    private queues;
+    private queueByType;
+    private renderer;
+    private subtitleOverlay;
+    private abortController;
+    private generation;
+    private sourceSize;
+    private durationUs;
+    private selectedTrackIds;
+    private preferredVideoPacketId;
+    private preferredAudioPacketId;
+    private preferredSubtitlePacketId;
+    private destroyed;
+    private internalSeek;
+    private seekTimer;
+    private playingStarted;
+    constructor(bridge: PlayerBridge);
+    selectVideoTrack(packetId: number): void;
+    selectAudioTrack(packetId: number): Promise<void>;
+    selectSubtitleTrack(packetId: number): void;
+    applicationEntry(contextId: number): string | null;
+    applications(): createTlvDemuxModule.ApplicationState[];
+    setSubtitleVisible(visible: boolean): void;
+    destroy(): void;
+    private initialize;
+    private restart;
+    private openMediaSource;
+    private consumeSource;
+    private discoverSourceSize;
+    private probeDuration;
+    private fetchRange;
+    private fetch;
+    private drainApplications;
+    private createSubtitleRenderer;
+    private maybeStartPlayback;
+    private applyBackpressure;
+    private bufferedAhead;
+    private releaseMediaSource;
+    private trackByPacket;
+    private readonly handleSeeking;
+    private fail;
+}
+export {};
+//# sourceMappingURL=tlv-player.d.ts.map

@@ -142,6 +142,9 @@ module.exports = {
 
     // define DPlayer version and Git hash
     plugins: [
+        // tlvdemux's single-file Emscripten wrapper contains a Node-only fs
+        // branch. Browser builds never execute it, so keep node:fs out of UMD.
+        new webpack.IgnorePlugin({resourceRegExp: /^node:fs$/}),
         new webpack.DefinePlugin({
             DPLAYER_VERSION: `"${require('../package.json').version}"`,
             GIT_HASH: JSON.stringify(gitRevisionPlugin.version()),

@@ -25,6 +25,7 @@ declare class Template {
     mobileForwardButton: HTMLElement;
     videoWrap: HTMLElement;
     videoWrapAspect: HTMLElement;
+    tlvMediaPlane: HTMLElement;
     controllerMask: HTMLElement;
     ptime: HTMLElement;
     settingButton: HTMLElement;

@@ -95,6 +95,9 @@ declare class DPlayer {
      * Detach event
      */
     off(name: DPlayerType.Events, callback: (info?: Event | any) => void): void;
+    selectTLVVideoTrack(packetId: number): void;
+    selectTLVAudioTrack(packetId: number): Promise<void>;
+    selectTLVSubtitleTrack(packetId: number): void;
     /**
      * Switch to a new video
      *
