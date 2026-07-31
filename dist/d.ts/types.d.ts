@@ -281,6 +281,7 @@ export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export interface TLVPlugin {
     readonly tracks: readonly TLVTrackInfo[];
+    seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;

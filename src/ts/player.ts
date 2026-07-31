@@ -191,7 +191,11 @@ class DPlayer {
             }
         }
 
-        if (isFinite(time)) {  // ignore NaN, Infinity, -Infinity
+        if (isFinite(time) && this.type === 'tlv') {
+            // TLV では native seeking イベントや buffered 範囲から DPlayer が再接続要否を推測しない。
+            // コントローラーで確定した要求時刻だけを TLV ローダーへ渡し、串流制御は完全に委譲する。
+            void this.plugins.tlv?.seek(time);
+        } else if (isFinite(time)) {  // ignore NaN, Infinity, -Infinity
             this.video.currentTime = time;
         }
 

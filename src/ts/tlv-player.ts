@@ -8,7 +8,6 @@ const CHUNK_SIZE = 2n * MiB;
 const INITIAL_PROBE_SIZE = 2n * MiB;
 const MAX_PROBE_SIZE = 64n * MiB;
 const SEEK_PREROLL_SIZE = 64n * MiB;
-const INTERNAL_SEEK_TOLERANCE_SECONDS = 0.05;
 const SOURCE_QUEUE_HIGH_BYTES = 4 * 1024 * 1024;
 
 type Module = createTlvDemuxModule.TlvDemuxModule;
@@ -160,15 +159,19 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredAudioPacketId: number | null = null;
     private preferredSubtitlePacketId: number | null = null;
     private destroyed = false;
-    private internalSeekTarget: number | null = null;
-    private seekTimer: number | null = null;
     private playingStarted = false;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
         this.preferredVideoPacketId = bridge.source.videoPacketId ?? null;
-        this.bridge.video.addEventListener('seeking', this.handleSeeking);
         void this.initialize();
+    }
+
+    async seek(time: number): Promise<void> {
+        // TLV のシークは DPlayer の seeking/buffered 状態推測を経由させず、UI から明示された時刻を
+        // そのまま TLV ローダーへ 1 回だけ渡す。串流の再構築と Range 制御は TLVPlayer 側だけが所有する。
+        if (this.bridge.live || this.destroyed) return;
+        await this.restart(time);
     }
 
     selectVideoTrack(packetId: number): void {
@@ -221,8 +224,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (this.destroyed) return;
         this.destroyed = true;
         this.generation += 1;
-        if (this.seekTimer !== null) window.clearTimeout(this.seekTimer);
-        this.bridge.video.removeEventListener('seeking', this.handleSeeking);
         this.abortController?.abort();
         this.demuxer?.delete();
         this.demuxer = null;
@@ -443,10 +444,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             demuxer.reposition(offset, true);
             discardPendingSegments = false;
             demuxer.setMseOutputEnabled(true);
-            // seeking イベントは currentTime 代入の呼び出しスタックより後で配送される。
-            // 真偽値を直後に戻すと内部位置合わせをユーザー操作と誤認して restart() が無限に連鎖するため、
-            // 次に届く同じ目標値のイベントを明示的に 1 回だけ無視する。
-            this.internalSeekTarget = startTimeSeconds;
             this.bridge.video.currentTime = startTimeSeconds;
         }
 
@@ -573,7 +570,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!range) return;
         if (this.bridge.live && range.end - Math.max(range.start, this.bridge.video.currentTime) < 0.5) return;
         if (this.bridge.video.currentTime < range.start) {
-            this.internalSeekTarget = range.start;
             this.bridge.video.currentTime = range.start;
         }
         this.playingStarted = true;
@@ -620,24 +616,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private trackByPacket(kind: createTlvDemuxModule.TrackKind, packetId: number): DPlayerType.TLVTrackInfo | undefined {
         return this.tracks.find(track => track.kind === kind && track.packetId === packetId);
     }
-
-    private readonly handleSeeking = (): void => {
-        if (this.bridge.live || this.destroyed) return;
-        const target = this.bridge.video.currentTime;
-        if (this.internalSeekTarget !== null) {
-            const internalSeekTarget = this.internalSeekTarget;
-            this.internalSeekTarget = null;
-            if (Math.abs(target - internalSeekTarget) <= INTERNAL_SEEK_TOLERANCE_SECONDS) return;
-        }
-        for (let index = 0; index < this.bridge.video.buffered.length; index += 1) {
-            if (this.bridge.video.buffered.start(index) <= target && this.bridge.video.buffered.end(index) >= target + 0.1) return;
-        }
-        if (this.seekTimer !== null) window.clearTimeout(this.seekTimer);
-        this.seekTimer = window.setTimeout(() => {
-            this.seekTimer = null;
-            void this.restart(target);
-        }, 100);
-    };
 
     private fail(error: unknown): void {
         const normalized = error instanceof Error ? error : new Error(String(error));

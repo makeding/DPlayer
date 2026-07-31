@@ -34,10 +34,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredAudioPacketId;
     private preferredSubtitlePacketId;
     private destroyed;
-    private internalSeekTarget;
-    private seekTimer;
     private playingStarted;
     constructor(bridge: PlayerBridge);
+    seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
@@ -61,7 +60,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private isMseCompatibleAudioTrack;
     private releaseMediaSource;
     private trackByPacket;
-    private readonly handleSeeking;
     private fail;
 }
 export {};
