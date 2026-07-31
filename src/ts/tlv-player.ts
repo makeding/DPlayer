@@ -28,6 +28,7 @@ type PlayerBridge = {
 
 class AppendQueue {
     readonly mime: string;
+    private readonly mediaSource: MediaSource;
     private readonly sourceBuffer: SourceBuffer;
     private readonly media: HTMLMediaElement;
     private readonly pending: Uint8Array[] = [];
@@ -38,6 +39,7 @@ class AppendQueue {
     constructor(mediaSource: MediaSource, media: HTMLMediaElement, mime: string, onUpdate: () => void) {
         if (!MediaSource.isTypeSupported(mime)) throw new Error(`Unsupported MSE type: ${mime}`);
         this.mime = mime;
+        this.mediaSource = mediaSource;
         this.media = media;
         this.sourceBuffer = mediaSource.addSourceBuffer(mime);
         this.sourceBuffer.mode = 'segments';
@@ -46,6 +48,7 @@ class AppendQueue {
             onUpdate();
         });
         this.sourceBuffer.addEventListener('error', () => this.stop());
+        mediaSource.addEventListener('sourceclose', () => this.stop());
     }
 
     append(data: Uint8Array): void {
@@ -94,6 +97,13 @@ class AppendQueue {
     private pump(): void {
         if (this.stopped || this.sourceBuffer.updating || this.pending.length === 0) {
             if (!this.sourceBuffer.updating && this.pending.length === 0) this.resolveWaiters();
+            return;
+        }
+        // Chromium は decoder 初期化失敗や品質・音声切り替えで MediaSource を閉じた直後にも
+        // 古い updateend を配送することがある。親から外れた SourceBuffer へ appendBuffer() しない。
+        if (this.mediaSource.readyState !== 'open' ||
+            Array.from(this.mediaSource.sourceBuffers).includes(this.sourceBuffer) === false) {
+            this.stop();
             return;
         }
         const data = this.pending.shift()!;
@@ -170,9 +180,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     async selectAudioTrack(packetId: number): Promise<void> {
-        this.preferredAudioPacketId = packetId;
         const track = this.trackByPacket('audio', packetId);
         if (!track) return;
+        if (this.isMseCompatibleAudioTrack(track) === false) {
+            this.bridge.notice('22.2-channel audio is not supported by browser MSE; use the 5.1 or stereo track.');
+            return;
+        }
+        this.preferredAudioPacketId = packetId;
         if (this.selectedTrackIds.get('audio') === track.trackId) return;
         await this.restart(this.bridge.live ? 0 : this.bridge.video.currentTime);
     }
@@ -328,7 +342,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     demuxer.selectTrack('video', track.trackId);
                     if (this.durationUs !== null) demuxer.setIndexDuration(this.durationUs);
                 } else if (track.kind === 'audio' && !this.selectedTrackIds.has('audio') &&
-                    (this.preferredAudioPacketId === null || track.packetId === this.preferredAudioPacketId)) {
+                    (this.preferredAudioPacketId === null ? this.isMseCompatibleAudioTrack(track) :
+                        track.packetId === this.preferredAudioPacketId)) {
                     this.selectedTrackIds.set('audio', track.trackId);
                     demuxer.selectTrack('audio', track.trackId);
                 } else if (track.kind === 'subtitle' && track.codec === 'ttml' && !this.selectedTrackIds.has('subtitle') &&
@@ -565,6 +580,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             }
         }
         return 0;
+    }
+
+    private isMseCompatibleAudioTrack(track: DPlayerType.TLVTrackInfo): boolean {
+        // ARIB の 22.2ch トラック (channel_configuration=14) は fMP4 上 13 channels の AAC になるが、
+        // 現行ブラウザの MSE audio decoder は受け付けない。8K 放送に併送される 5.1ch/2ch を使う。
+        return track.audio?.channelLayout !== 14;
     }
 
     private releaseMediaSource(): void {

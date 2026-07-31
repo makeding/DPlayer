@@ -58,6 +58,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private maybeStartPlayback;
     private applyBackpressure;
     private bufferedAhead;
+    private isMseCompatibleAudioTrack;
     private releaseMediaSource;
     private trackByPacket;
     private readonly handleSeeking;
