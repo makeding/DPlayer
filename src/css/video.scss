@@ -39,9 +39,11 @@
             display: block;
         }
         .dplayer-video[data-tlv-src] {
+            position: relative;
             width: 100%;
             height: 100%;
             object-fit: contain;
+            z-index: 1;
         }
         .dplayer-video-prepare {
             display: none;

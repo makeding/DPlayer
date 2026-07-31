@@ -1066,7 +1066,7 @@ class DPlayer {
             crossOrigin: this.options.crossOrigin,
         });
         const videoEle = new DOMParser().parseFromString(videoHTML, 'text/html').body.firstChild as HTMLVideoElement;
-        this.template.tlvMediaPlane.prepend(videoEle);
+        this.template.videoWrapAspect.insertBefore(videoEle, this.template.tlvMediaPlane);
         this.prevVideoCurrentTime = this.video.currentTime;
         this.prevVideo = this.video;
         this.video = videoEle;
