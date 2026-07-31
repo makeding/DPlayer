@@ -220,6 +220,14 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         return this.demuxer?.applications() ?? [];
     }
 
+    applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[] {
+        return this.demuxer?.applicationResources(contextId ?? null) ?? [];
+    }
+
+    applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null {
+        return this.demuxer?.applicationResource(contextId, path) ?? null;
+    }
+
     setSubtitleVisible(visible: boolean): void {
         if (!this.subtitleOverlay) return;
         this.subtitleOverlay.style.display = visible ? '' : 'none';

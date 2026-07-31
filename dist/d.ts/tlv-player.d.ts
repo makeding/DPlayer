@@ -43,6 +43,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     selectSubtitleTrack(packetId: number): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
+    applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
+    applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     setSubtitleVisible(visible: boolean): void;
     destroy(): void;
     private initialize;
