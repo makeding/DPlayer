@@ -35,6 +35,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredSubtitlePacketId;
     private destroyed;
     private playingStarted;
+    private pendingSeekTime;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;

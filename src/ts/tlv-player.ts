@@ -160,6 +160,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredSubtitlePacketId: number | null = null;
     private destroyed = false;
     private playingStarted = false;
+    private pendingSeekTime: number | null = null;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -171,6 +172,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // TLV のシークは DPlayer の seeking/buffered 状態推測を経由させず、UI から明示された時刻を
         // そのまま TLV ローダーへ 1 回だけ渡す。串流の再構築と Range 制御は TLVPlayer 側だけが所有する。
         if (this.bridge.live || this.destroyed) return;
+        // tlvdemux WASM のロード中に受け取った初回位置は捨てず、初回の MSE 構築に直接使う。
+        // これにより 0 秒の串流を一度開始してから再シークする競合自体を発生させない。
+        if (this.module === null) {
+            this.pendingSeekTime = time;
+            return;
+        }
         await this.restart(time);
     }
 
@@ -238,7 +245,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         try {
             this.module = await createTlvDemuxModule();
             if (this.destroyed) return;
-            await this.restart(0);
+            // WASM のロード中に要求された視聴履歴位置があれば、0 秒を経由せずその位置から開始する。
+            const initialSeekTime = this.pendingSeekTime ?? 0;
+            this.pendingSeekTime = null;
+            await this.restart(initialSeekTime);
             if (!this.destroyed) this.bridge.emit('tlv_ready', this);
         } catch (error) {
             this.fail(error);
@@ -380,7 +390,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                             headVideoSeen = true;
                         }
                     }
-                    if (unit.trackId === this.selectedTrackIds.get('subtitle') && selectedSubtitleTrack && this.renderer) {
+                    // VOD シーク前の先頭解析・RAP 探索中の字幕は、映像と同様に再生対象ではない。
+                    // これを renderer へ渡すと古い字幕時刻が残り、シーク先の字幕が表示されなくなる。
+                    if (!discardPendingSegments && unit.trackId === this.selectedTrackIds.get('subtitle') &&
+                        selectedSubtitleTrack && this.renderer) {
                         if (unit.discontinuity) this.renderer.reset();
                         this.renderer.push({
                             packetId: selectedSubtitleTrack.packetId,
@@ -452,6 +465,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             offset = resolvedSeekRap.restartOffset;
             seekProbe = false;
             demuxer.reposition(offset, true);
+            // 探索中に構築された字幕内部状態を破棄し、シーク先の字幕だけを新しい時刻軸で受け取る。
+            this.renderer?.reset();
             discardPendingSegments = false;
             demuxer.setMseOutputEnabled(true);
             this.bridge.video.currentTime = startTimeSeconds;
