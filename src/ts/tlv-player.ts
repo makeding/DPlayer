@@ -297,8 +297,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // Range 読み込みを続けてしまうため、init だけを保持して media segment は明示的に捨てる。
         let discardPendingSegments = startTimeSeconds > 0;
         let selectedSubtitleTrack: createTlvDemuxModule.TrackInfo | null = null;
+        let headVideoSeen = false;
         let seekRap: {seconds: number; restartOffset: bigint} | null = null;
-        let seekProbe = startTimeSeconds > 0;
+        // 先頭解析中の RAP をシーク候補として扱うと、どの要求時刻でもファイル先頭付近から再生してしまう。
+        // demo と同じく、推定位置へ reposition() した後の明示的な probe 中だけ RAP を採用する。
+        let seekProbe = false;
 
         const installInits = (): void => {
             if (!this.mediaSource || this.queueByType.size > 0 || !pendingInits.has('video') || !pendingInits.has('audio')) return;
@@ -367,11 +370,15 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
             onAccessUnitView: unit => {
                 try {
-                    if (seekProbe && unit.trackId === this.selectedTrackIds.get('video') && unit.randomAccess && seekRap === null) {
-                        seekRap = {
-                            seconds: Number(unit.ptsValue) / unit.ptsTimescale,
-                            restartOffset: unit.restartOffset,
-                        };
+                    if (unit.trackId === this.selectedTrackIds.get('video')) {
+                        if (seekProbe && unit.randomAccess && seekRap === null) {
+                            seekRap = {
+                                seconds: Number(unit.ptsValue) / unit.ptsTimescale,
+                                restartOffset: unit.restartOffset,
+                            };
+                        } else if (!seekProbe) {
+                            headVideoSeen = true;
+                        }
                     }
                     if (unit.trackId === this.selectedTrackIds.get('subtitle') && selectedSubtitleTrack && this.renderer) {
                         if (unit.discontinuity) this.renderer.reset();
@@ -414,21 +421,24 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!this.bridge.live && startTimeSeconds > 0 && this.sourceSize !== null && this.durationUs !== null) {
             const headSize = this.sourceSize < 64n * MiB ? this.sourceSize : 64n * MiB;
             for (let headOffset = 0n;
-                 headOffset < headSize && (!pendingInits.has('video') || !pendingInits.has('audio'));
+                 headOffset < headSize &&
+                    (!pendingInits.has('video') || !pendingInits.has('audio') || !headVideoSeen);
                  headOffset += CHUNK_SIZE) {
                 const size = headSize - headOffset < CHUNK_SIZE ? headSize - headOffset : CHUNK_SIZE;
                 if (!demuxer.push(await this.fetchRange(headOffset, size, signal))) throw new Error('TLV head parsing failed.');
                 this.drainApplications(demuxer, generation);
                 if (callbackError) throw callbackError;
             }
-            if (!pendingInits.has('video') || !pendingInits.has('audio')) {
-                throw new Error('TLV head parsing found no MSE audio/video initialization pair.');
+            if (!pendingInits.has('video') || !pendingInits.has('audio') || !headVideoSeen) {
+                throw new Error('TLV head parsing found no MSE audio/video initialization pair or video access unit.');
             }
             demuxer.setMseOutputEnabled(false);
             const targetUs = BigInt(Math.round(startTimeSeconds * 1000000));
             const estimate = demuxer.estimateOffset(targetUs, this.sourceSize);
             if (estimate === null) throw new Error('TLV seek offset could not be estimated.');
             const candidate = estimate > SEEK_PREROLL_SIZE ? estimate - SEEK_PREROLL_SIZE : 0n;
+            seekRap = null;
+            seekProbe = true;
             demuxer.reposition(candidate, true);
             let probeOffset = candidate;
             const probeEnd = candidate + SEEK_PREROLL_SIZE < this.sourceSize ? candidate + SEEK_PREROLL_SIZE : this.sourceSize;
