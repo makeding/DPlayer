@@ -22,8 +22,9 @@
     }
 
     .dplayer-tlv-media-plane {
-        position: absolute;
-        inset: 0;
+        position: relative;
+        width: 100%;
+        height: 100%;
         display: grid;
         overflow: hidden;
         background: #000;
