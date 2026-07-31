@@ -827,14 +827,17 @@ class DPlayer {
                     }
                     break;
                 case 'tlv': {
-                    if (!('MediaSource' in window) || !window.fetch || !video.src) {
+                    // Raw TLV はブラウザが直接再生できないため、video.src には渡さず
+                    // tlvdemux が構築する MediaSource の URL だけを後から設定する。
+                    const sourceUrl = video.dataset.tlvSrc || video.src;
+                    if (!('MediaSource' in window) || !window.fetch || !sourceUrl) {
                         this.notice('Error: MMT/TLV playback is not supported.', undefined, undefined, '#FF6F6A');
                         break;
                     }
                     if (this.options.subtitle) this.options.subtitle.type = 'aribb62';
                     const source = this.quality?.tlv ?? this.options.video.tlv ?? {};
                     const tlvPlayer = new TLVPlayer({
-                        url: video.src,
+                        url: sourceUrl,
                         video,
                         mediaPlane: this.template.tlvMediaPlane,
                         live: this.options.live,
@@ -1058,6 +1061,7 @@ class DPlayer {
             screenshot: this.options.screenshot,
             preload: 'auto',
             url: this.quality.url,
+            type: this.quality.type || this.options.video.type,
             subtitle: this.options.subtitle,
             crossOrigin: this.options.crossOrigin,
         });

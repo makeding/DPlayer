@@ -7,7 +7,7 @@
     {{ if pic }}poster="{{ pic }}"{{ /if }}
     {{ if crossOrigin !== null || screenshot || enableSubtitle }}crossorigin="{{ crossOrigin ? crossOrigin : 'anonymous' }}"{{ /if }}
     {{ if preload }}preload="{{ preload }}"{{ /if }}
-    {{ if url }}src="{{ url }}"{{ /if }}
+    {{ if type === 'tlv' }}data-tlv-src="{{ url }}"{{ else if url }}src="{{ url }}"{{ /if }}
     >
     {{ if enableSubtitle }}
     <track kind="metadata" default src="{{ subtitle.url }}"></track>
