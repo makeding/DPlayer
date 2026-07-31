@@ -290,6 +290,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const pendingInits = new Map<string, createTlvDemuxModule.MseTrackInit>();
         const pendingSegments = new Map<string, Uint8Array[]>([['video', []], ['audio', []]]);
         let callbackError: unknown = null;
+        // VOD シークでは先頭をインデックス作成用に読む一方、その区間の media segment は再生してはいけない。
+        // ただし MSE 出力全体を無効にすると audio init まで失われ、SourceBuffer を作れないままファイル末尾まで
+        // Range 読み込みを続けてしまうため、init だけを保持して media segment は明示的に捨てる。
+        let discardPendingSegments = startTimeSeconds > 0;
         let selectedSubtitleTrack: createTlvDemuxModule.TrackInfo | null = null;
         let seekRap: {seconds: number; restartOffset: bigint} | null = null;
         let seekProbe = startTimeSeconds > 0;
@@ -307,6 +311,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             }
         };
         const appendSegment = (type: string, data: Uint8Array): void => {
+            if (discardPendingSegments) return;
             const queue = this.queueByType.get(type);
             if (queue) queue.append(data);
             else pendingSegments.get(type)?.push(data);
@@ -335,7 +340,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 }
             },
             onTrack: track => {
-                this.tracks.push(track);
+                // MMT のテーブル更新で同じトラックが再通知されることがある。
+                // packet_id は同一 service 内のトラック識別子なので、既存項目を更新して重複させない。
+                const track_index = this.tracks.findIndex(candidate => candidate.packetId === track.packetId);
+                if (track_index === -1) this.tracks.push(track);
+                else this.tracks[track_index] = track;
                 if (track.kind === 'video' && !this.selectedTrackIds.has('video') &&
                     (this.preferredVideoPacketId === null || track.packetId === this.preferredVideoPacketId)) {
                     this.selectedTrackIds.set('video', track.trackId);
@@ -401,13 +410,19 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
         let offset = 0n;
         if (!this.bridge.live && startTimeSeconds > 0 && this.sourceSize !== null && this.durationUs !== null) {
-            demuxer.setMseOutputEnabled(false);
             const headSize = this.sourceSize < 64n * MiB ? this.sourceSize : 64n * MiB;
-            for (let headOffset = 0n; headOffset < headSize && !this.selectedTrackIds.has('video'); headOffset += CHUNK_SIZE) {
+            for (let headOffset = 0n;
+                 headOffset < headSize && (!pendingInits.has('video') || !pendingInits.has('audio'));
+                 headOffset += CHUNK_SIZE) {
                 const size = headSize - headOffset < CHUNK_SIZE ? headSize - headOffset : CHUNK_SIZE;
                 if (!demuxer.push(await this.fetchRange(headOffset, size, signal))) throw new Error('TLV head parsing failed.');
                 this.drainApplications(demuxer, generation);
+                if (callbackError) throw callbackError;
             }
+            if (!pendingInits.has('video') || !pendingInits.has('audio')) {
+                throw new Error('TLV head parsing found no MSE audio/video initialization pair.');
+            }
+            demuxer.setMseOutputEnabled(false);
             const targetUs = BigInt(Math.round(startTimeSeconds * 1000000));
             const estimate = demuxer.estimateOffset(targetUs, this.sourceSize);
             if (estimate === null) throw new Error('TLV seek offset could not be estimated.');
@@ -425,6 +440,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             offset = resolvedSeekRap.restartOffset;
             seekProbe = false;
             demuxer.reposition(offset, true);
+            discardPendingSegments = false;
             demuxer.setMseOutputEnabled(true);
             this.internalSeek = true;
             this.bridge.video.currentTime = startTimeSeconds;
