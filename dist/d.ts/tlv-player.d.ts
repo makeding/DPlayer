@@ -34,7 +34,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredAudioPacketId;
     private preferredSubtitlePacketId;
     private destroyed;
-    private internalSeek;
+    private internalSeekTarget;
     private seekTimer;
     private playingStarted;
     constructor(bridge: PlayerBridge);

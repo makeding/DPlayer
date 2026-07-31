@@ -8,6 +8,7 @@ const CHUNK_SIZE = 2n * MiB;
 const INITIAL_PROBE_SIZE = 2n * MiB;
 const MAX_PROBE_SIZE = 64n * MiB;
 const SEEK_PREROLL_SIZE = 64n * MiB;
+const INTERNAL_SEEK_TOLERANCE_SECONDS = 0.05;
 const SOURCE_QUEUE_HIGH_BYTES = 4 * 1024 * 1024;
 
 type Module = createTlvDemuxModule.TlvDemuxModule;
@@ -159,7 +160,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredAudioPacketId: number | null = null;
     private preferredSubtitlePacketId: number | null = null;
     private destroyed = false;
-    private internalSeek = false;
+    private internalSeekTarget: number | null = null;
     private seekTimer: number | null = null;
     private playingStarted = false;
 
@@ -442,9 +443,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             demuxer.reposition(offset, true);
             discardPendingSegments = false;
             demuxer.setMseOutputEnabled(true);
-            this.internalSeek = true;
+            // seeking イベントは currentTime 代入の呼び出しスタックより後で配送される。
+            // 真偽値を直後に戻すと内部位置合わせをユーザー操作と誤認して restart() が無限に連鎖するため、
+            // 次に届く同じ目標値のイベントを明示的に 1 回だけ無視する。
+            this.internalSeekTarget = startTimeSeconds;
             this.bridge.video.currentTime = startTimeSeconds;
-            this.internalSeek = false;
         }
 
         if (this.bridge.live) {
@@ -570,9 +573,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!range) return;
         if (this.bridge.live && range.end - Math.max(range.start, this.bridge.video.currentTime) < 0.5) return;
         if (this.bridge.video.currentTime < range.start) {
-            this.internalSeek = true;
+            this.internalSeekTarget = range.start;
             this.bridge.video.currentTime = range.start;
-            this.internalSeek = false;
         }
         this.playingStarted = true;
         void this.bridge.video.play().catch(() => undefined);
@@ -620,8 +622,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     private readonly handleSeeking = (): void => {
-        if (this.bridge.live || this.internalSeek || this.destroyed) return;
+        if (this.bridge.live || this.destroyed) return;
         const target = this.bridge.video.currentTime;
+        if (this.internalSeekTarget !== null) {
+            const internalSeekTarget = this.internalSeekTarget;
+            this.internalSeekTarget = null;
+            if (Math.abs(target - internalSeekTarget) <= INTERNAL_SEEK_TOLERANCE_SECONDS) return;
+        }
         for (let index = 0; index < this.bridge.video.buffered.length; index += 1) {
             if (this.bridge.video.buffered.start(index) <= target && this.bridge.video.buffered.end(index) >= target + 0.1) return;
         }
