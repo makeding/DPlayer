@@ -370,11 +370,22 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                         track.packetId === this.preferredAudioPacketId)) {
                     this.selectedTrackIds.set('audio', track.trackId);
                     demuxer.selectTrack('audio', track.trackId);
-                } else if (track.kind === 'subtitle' && track.codec === 'ttml' && !this.selectedTrackIds.has('subtitle') &&
-                    (this.preferredSubtitlePacketId === null || track.packetId === this.preferredSubtitlePacketId)) {
-                    this.selectedTrackIds.set('subtitle', track.trackId);
-                    selectedSubtitleTrack = track;
-                    demuxer.selectTrack('subtitle', track.trackId);
+                } else if (track.kind === 'subtitle' && track.codec === 'ttml') {
+                    const currentSubtitleTrackId = this.selectedTrackIds.get('subtitle');
+                    const currentSubtitleTrack = this.tracks.find(candidate => candidate.trackId === currentSubtitleTrackId);
+                    // MMT では文字スーパー (component_tag 0x38-0x3f) が番組字幕 (0x30-0x37) より先に
+                    // 通知されることがある。packet_id が明示されていない場合は、最初に見つかった TTML ではなく
+                    // 番組字幕を優先し、後から見つかった場合も自動で選び直す。
+                    const shouldSelectSubtitle = this.preferredSubtitlePacketId !== null ?
+                        track.packetId === this.preferredSubtitlePacketId :
+                        currentSubtitleTrack === undefined ||
+                        this.subtitleTrackPriority(track) > this.subtitleTrackPriority(currentSubtitleTrack);
+                    if (shouldSelectSubtitle) {
+                        this.selectedTrackIds.set('subtitle', track.trackId);
+                        selectedSubtitleTrack = track;
+                        demuxer.selectTrack('subtitle', track.trackId);
+                        this.renderer?.reset();
+                    }
                 }
                 this.bridge.emit('tlv_tracks', [...this.tracks]);
             },
@@ -625,6 +636,14 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // ARIB の 22.2ch トラック (channel_configuration=14) は fMP4 上 13 channels の AAC になるが、
         // 現行ブラウザの MSE audio decoder は受け付けない。8K 放送に併送される 5.1ch/2ch を使う。
         return track.audio?.channelLayout !== 14;
+    }
+
+    private subtitleTrackPriority(track: DPlayerType.TLVTrackInfo): number {
+        // ARIB の component_tag 0x30-0x37 は字幕、0x38-0x3f は文字スーパーに割り当てられる。
+        // 字幕ボタンの既定対象には番組字幕を優先しつつ、それがないサービスでは文字スーパーも利用可能にする。
+        if (track.componentTag >= 0x30 && track.componentTag <= 0x37) return 2;
+        if (track.componentTag >= 0x38 && track.componentTag <= 0x3f) return 1;
+        return 0;
     }
 
     private releaseMediaSource(): void {
