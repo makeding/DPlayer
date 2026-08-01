@@ -70,6 +70,7 @@ export type PlayerEvents =
     'tlv_error' |
     'tlv_tracks' |
     'tlv_track_change' |
+    'tlv_caption_data' |
     'tlv_broadcast_clock' |
     'tlv_event_info' |
     'tlv_stream_event' |
@@ -385,6 +386,22 @@ export interface TLVOptions {
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
+export interface TLVCaptionData {
+    trackId: bigint;
+    packetId: number;
+    componentTag: number;
+    subtitleTimingMode: number | null;
+    mpuSequenceNumber: number | null;
+    ptsValue: bigint;
+    ptsTimescale: number;
+    dtsValue: bigint;
+    dtsTimescale: number;
+    subtitleReferenceStartPtsValue: bigint | null;
+    subtitleReferenceStartPtsTimescale: number | null;
+    data: Uint8Array;
+    subtitleResources: createTlvDemuxModule.SubtitleResource[];
+    discontinuity: boolean;
+}
 export interface TLVPlugin {
     readonly tracks: readonly TLVTrackInfo[];
     seek(time: number): Promise<void>;
@@ -397,6 +414,8 @@ export interface TLVPlugin {
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
+    /** Suppress duplicate native rendering for components consumed by a data-broadcast page. */
+    setSubtitleSuppressedComponentTags(componentTags: number[]): void;
     setSubtitleVisible(visible: boolean): void;
     destroy(): void;
 }

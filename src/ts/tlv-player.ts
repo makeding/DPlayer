@@ -158,6 +158,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredVideoPacketId: number | null;
     private preferredAudioPacketId: number | null = null;
     private preferredSubtitlePacketId: number | null = null;
+    private suppressedSubtitleComponentTags = new Set<number>();
     private destroyed = false;
     private playingStarted = false;
     private pendingSeekTime: number | null = null;
@@ -230,6 +231,18 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null {
         return this.demuxer?.applicationResource(contextId, path) ?? null;
+    }
+
+    setSubtitleSuppressedComponentTags(componentTags: number[]): void {
+        this.suppressedSubtitleComponentTags = new Set(componentTags
+            .map(Number)
+            .filter(tag => Number.isInteger(tag) && tag >= 0 && tag <= 0xffff)
+            .map(tag => tag & 0xff));
+        const selectedTrackId = this.selectedTrackIds.get('subtitle');
+        const selectedTrack = this.tracks.find(track => track.trackId === selectedTrackId);
+        if (selectedTrack && this.suppressedSubtitleComponentTags.has(selectedTrack.componentTag & 0xff)) {
+            this.renderer?.reset();
+        }
     }
 
     setSubtitleVisible(visible: boolean): void {
@@ -415,8 +428,34 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     }
                     // VOD シーク前の先頭解析・RAP 探索中の字幕は、映像と同様に再生対象ではない。
                     // これを renderer へ渡すと古い字幕時刻が残り、シーク先の字幕が表示されなくなる。
+                    const subtitleTrack = this.tracks.find(track => track.trackId === unit.trackId &&
+                        track.kind === 'subtitle' && track.codec === 'ttml');
+                    if (!discardPendingSegments && subtitleTrack) {
+                        this.bridge.emit('tlv_caption_data', {
+                            trackId: unit.trackId,
+                            packetId: subtitleTrack.packetId,
+                            componentTag: unit.componentTag,
+                            subtitleTimingMode: unit.subtitleTimingMode,
+                            mpuSequenceNumber: unit.mpuSequenceNumber,
+                            ptsValue: unit.ptsValue,
+                            ptsTimescale: unit.ptsTimescale,
+                            dtsValue: unit.dtsValue,
+                            dtsTimescale: unit.dtsTimescale,
+                            subtitleReferenceStartPtsValue: unit.subtitleReferenceStartPtsValue,
+                            subtitleReferenceStartPtsTimescale: unit.subtitleReferenceStartPtsTimescale,
+                            // AccessUnit の主 payload は callback-lifetime の WASM view なので、
+                            // DPlayer event として公開する前に所有権をブラウザ側へ移す。
+                            data: unit.data.slice(),
+                            subtitleResources: unit.subtitleResources.map(resource => ({
+                                ...resource,
+                                data: resource.data.slice(),
+                            })),
+                            discontinuity: unit.discontinuity,
+                        } satisfies DPlayerType.TLVCaptionData);
+                    }
                     if (!discardPendingSegments && unit.trackId === this.selectedTrackIds.get('subtitle') &&
                         selectedSubtitleTrack && this.renderer) {
+                        if (this.suppressedSubtitleComponentTags.has(unit.componentTag & 0xff)) return;
                         if (unit.discontinuity) this.renderer.reset();
                         this.renderer.push({
                             packetId: selectedSubtitleTrack.packetId,
@@ -452,6 +491,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
         });
         this.demuxer = demuxer;
+        // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
+        // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
+        demuxer.setSubtitlePassthroughEnabled(true);
         demuxer.startIndex(this.bridge.live);
 
         let offset = 0n;

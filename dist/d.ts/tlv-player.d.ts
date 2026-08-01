@@ -33,6 +33,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private preferredVideoPacketId;
     private preferredAudioPacketId;
     private preferredSubtitlePacketId;
+    private suppressedSubtitleComponentTags;
     private destroyed;
     private playingStarted;
     private pendingSeekTime;
@@ -46,6 +47,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
+    setSubtitleSuppressedComponentTags(componentTags: number[]): void;
     setSubtitleVisible(visible: boolean): void;
     destroy(): void;
     private initialize;
