@@ -9,6 +9,8 @@
     color: #fff;
     font-size: 14px;
     line-height: 1.6;
+    // Notices are player UI, not part of the application/video composition.
+    z-index: 3;
     transition: all .3s ease-in-out, color 0s;
     opacity: 0;
     overflow: hidden;

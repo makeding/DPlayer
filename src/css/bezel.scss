@@ -6,6 +6,8 @@
     bottom: 0;
     font-size: 22px;
     color: #fff;
+    // Keep play/pause/loading feedback visible over a data-broadcast iframe.
+    z-index: 3;
     pointer-events: none;
     .dplayer-bezel-icon {
         position: absolute;
