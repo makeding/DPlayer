@@ -9,10 +9,80 @@ const INITIAL_PROBE_SIZE = 2n * MiB;
 const MAX_PROBE_SIZE = 64n * MiB;
 const SEEK_PREROLL_SIZE = 64n * MiB;
 const SOURCE_QUEUE_HIGH_BYTES = 4 * 1024 * 1024;
+const LIVE_CHUNK_TARGET_BYTES = 512 * 1024;
+const LIVE_CHUNK_MAX_DELAY_MILLISECONDS = 25;
+const BACK_BUFFER_TRIM_GRANULARITY_SECONDS = 2;
 
 type Module = createTlvDemuxModule.TlvDemuxModule;
 type Demuxer = createTlvDemuxModule.TlvDemuxer;
 type BrowserMediaSourceConstructor = typeof MediaSource;
+
+function joinChunks(chunks: Uint8Array[], byteLength: number): Uint8Array {
+    if (chunks.length === 1) return chunks[0];
+    const output = new Uint8Array(byteLength);
+    let offset = 0;
+    for (const chunk of chunks) {
+        output.set(chunk, offset);
+        offset += chunk.byteLength;
+    }
+    return output;
+}
+
+async function* coalesceLiveStream(
+    reader: ReadableStreamDefaultReader<Uint8Array>,
+): AsyncGenerator<Uint8Array> {
+    let pendingRead = reader.read();
+    let chunks: Uint8Array[] = [];
+    let chunkBytes = 0;
+    let flushDeadline = 0;
+    const flush = (): Uint8Array => {
+        const output = joinChunks(chunks, chunkBytes);
+        chunks = [];
+        chunkBytes = 0;
+        flushDeadline = 0;
+        return output;
+    };
+
+    try {
+        for (;;) {
+            let result: {kind: 'read'; value: ReadableStreamReadResult<Uint8Array>} | {kind: 'deadline'};
+            if (chunkBytes === 0) {
+                result = {kind: 'read', value: await pendingRead};
+            } else {
+                const remaining = Math.max(0, flushDeadline - performance.now());
+                result = await Promise.race([
+                    pendingRead.then(value => ({kind: 'read' as const, value})),
+                    new Promise<{kind: 'deadline'}>(resolve => window.setTimeout(
+                        () => resolve({kind: 'deadline'}), remaining,
+                    )),
+                ]);
+            }
+            if (result.kind === 'deadline') {
+                yield flush();
+                continue;
+            }
+
+            const {done, value} = result.value;
+            if (done) {
+                if (chunkBytes !== 0) yield flush();
+                break;
+            }
+            pendingRead = reader.read();
+            if (!value.byteLength) continue;
+            if (chunkBytes === 0 && value.byteLength >= LIVE_CHUNK_TARGET_BYTES) {
+                yield value;
+                continue;
+            }
+            if (chunkBytes === 0) flushDeadline = performance.now() + LIVE_CHUNK_MAX_DELAY_MILLISECONDS;
+            chunks.push(value);
+            chunkBytes += value.byteLength;
+            if (chunkBytes >= LIVE_CHUNK_TARGET_BYTES) yield flush();
+        }
+    } finally {
+        await reader.cancel().catch(() => undefined);
+        reader.releaseLock();
+    }
+}
 
 // iOS/iPadOS expose MSE through ManagedMediaSource instead of MediaSource.
 // Both APIs implement the same SourceBuffer-facing surface used below.
@@ -43,6 +113,7 @@ class AppendQueue {
     private pendingBytes = 0;
     private stopped = false;
     private waiters: Array<() => void> = [];
+    private trimBeforeTime: number | null = null;
 
     constructor(mediaSource: MediaSource, media: HTMLMediaElement, mime: string, onUpdate: () => void) {
         if (!BrowserMediaSource?.isTypeSupported(mime)) throw new Error(`Unsupported MSE type: ${mime}`);
@@ -78,10 +149,9 @@ class AppendQueue {
     }
 
     trimBefore(time: number): void {
-        if (this.stopped || this.sourceBuffer.updating || !(time > 0) || this.sourceBuffer.buffered.length === 0) return;
-        const start = this.sourceBuffer.buffered.start(0);
-        const end = Math.min(time, this.sourceBuffer.buffered.end(this.sourceBuffer.buffered.length - 1));
-        if (end > start + 0.1) this.sourceBuffer.remove(start, end);
+        if (this.stopped || !(time > 0)) return;
+        this.trimBeforeTime = Math.max(this.trimBeforeTime ?? 0, time);
+        this.pump();
     }
 
     async waitBelow(limit: number): Promise<void> {
@@ -103,8 +173,9 @@ class AppendQueue {
     }
 
     private pump(): void {
-        if (this.stopped || this.sourceBuffer.updating || this.pending.length === 0) {
-            if (!this.sourceBuffer.updating && this.pending.length === 0) this.resolveWaiters();
+        if (this.stopped || this.sourceBuffer.updating) return;
+        if (this.pending.length === 0 && this.trimBeforeTime === null) {
+            this.resolveWaiters();
             return;
         }
         // Chromium は decoder 初期化失敗や品質・音声切り替えで MediaSource を閉じた直後にも
@@ -114,9 +185,25 @@ class AppendQueue {
             this.stop();
             return;
         }
+        if (this.trimBeforeTime !== null && this.sourceBuffer.buffered.length > 0) {
+            const start = this.sourceBuffer.buffered.start(0);
+            const end = Math.min(
+                this.trimBeforeTime,
+                this.sourceBuffer.buffered.end(this.sourceBuffer.buffered.length - 1),
+            );
+            if (end > start + BACK_BUFFER_TRIM_GRANULARITY_SECONDS) {
+                this.trimBeforeTime = null;
+                this.sourceBuffer.remove(start, end);
+                return;
+            }
+        }
+        if (this.pending.length === 0) {
+            this.resolveWaiters();
+            return;
+        }
         const data = this.pending.shift()!;
         this.pendingBytes -= data.byteLength;
-        this.sourceBuffer.appendBuffer(new Uint8Array(data).buffer as ArrayBuffer);
+        this.sourceBuffer.appendBuffer(data as Uint8Array<ArrayBuffer>);
         if (this.pendingBytes <= SOURCE_QUEUE_HIGH_BYTES) this.resolveWaiters();
     }
 
@@ -170,6 +257,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private destroyed = false;
     private playingStarted = false;
     private pendingSeekTime: number | null = null;
+    private inputAddress = 0;
+    private inputCapacity = 0;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -267,6 +356,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.abortController?.abort();
         this.demuxer?.delete();
         this.demuxer = null;
+        if (this.module && this.inputAddress) this.module._free(this.inputAddress);
+        this.inputAddress = 0;
+        this.inputCapacity = 0;
         this.renderer?.destroy();
         this.renderer = null;
         this.subtitleOverlay?.remove();
@@ -512,7 +604,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
         demuxer.setSubtitlePassthroughEnabled(true);
-        demuxer.startIndex(this.bridge.live);
+        if (!this.bridge.live) demuxer.startIndex(false);
 
         let offset = 0n;
         if (!this.bridge.live && startTimeSeconds > 0 && this.sourceSize !== null && this.durationUs !== null) {
@@ -522,7 +614,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     (!pendingInits.has('video') || !pendingInits.has('audio') || !headVideoSeen);
                  headOffset += CHUNK_SIZE) {
                 const size = headSize - headOffset < CHUNK_SIZE ? headSize - headOffset : CHUNK_SIZE;
-                if (!demuxer.push(await this.fetchRange(headOffset, size, signal))) throw new Error('TLV head parsing failed.');
+                if (!this.pushBytes(demuxer, await this.fetchRange(headOffset, size, signal))) {
+                    throw new Error('TLV head parsing failed.');
+                }
                 this.drainApplications(demuxer, generation);
                 if (callbackError) throw callbackError;
             }
@@ -541,7 +635,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             const probeEnd = candidate + SEEK_PREROLL_SIZE < this.sourceSize ? candidate + SEEK_PREROLL_SIZE : this.sourceSize;
             while (seekRap === null && probeOffset < probeEnd) {
                 const size = probeEnd - probeOffset < CHUNK_SIZE ? probeEnd - probeOffset : CHUNK_SIZE;
-                if (!demuxer.push(await this.fetchRange(probeOffset, size, signal))) throw new Error('TLV seek probe failed.');
+                if (!this.pushBytes(demuxer, await this.fetchRange(probeOffset, size, signal))) {
+                    throw new Error('TLV seek probe failed.');
+                }
                 probeOffset += size;
             }
             const resolvedSeekRap = seekRap as {seconds: number; restartOffset: bigint} | null;
@@ -560,10 +656,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             const response = await this.fetch(this.bridge.url, {}, signal);
             if (!response.ok || !response.body) throw new Error(`TLV live request failed: HTTP ${response.status}`);
             const reader = response.body.getReader();
-            for (;;) {
-                const result = await reader.read();
-                if (result.done || generation !== this.generation) break;
-                if (!demuxer.push(result.value)) throw new Error('TLV live demux failed.');
+            for await (const data of coalesceLiveStream(reader)) {
+                if (generation !== this.generation) break;
+                if (!this.pushBytes(demuxer, data)) throw new Error('TLV live demux failed.');
                 this.drainApplications(demuxer, generation);
                 if (callbackError) throw callbackError;
                 await this.applyBackpressure();
@@ -571,7 +666,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         } else if (this.sourceSize !== null) {
             while (offset < this.sourceSize && generation === this.generation) {
                 const size = this.sourceSize - offset < CHUNK_SIZE ? this.sourceSize - offset : CHUNK_SIZE;
-                if (!demuxer.push(await this.fetchRange(offset, size, signal))) throw new Error(`TLV demux failed at ${offset}.`);
+                if (!this.pushBytes(demuxer, await this.fetchRange(offset, size, signal))) {
+                    throw new Error(`TLV demux failed at ${offset}.`);
+                }
                 offset += size;
                 this.drainApplications(demuxer, generation);
                 if (callbackError) throw callbackError;
@@ -627,6 +724,25 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const data = new Uint8Array(await response.arrayBuffer());
         if (BigInt(data.byteLength) !== length) throw new Error(`TLV Range length mismatch at ${offset}.`);
         return data;
+    }
+
+    private pushBytes(demuxer: Demuxer, bytes: Uint8Array): boolean {
+        if (!this.module) return false;
+        if (bytes.byteLength === 0) return demuxer.pushFromHeap(0, 0);
+        if (bytes.byteLength > this.inputCapacity) {
+            const allocationUnit = 64 * 1024;
+            const capacity = Math.ceil(bytes.byteLength / allocationUnit) * allocationUnit;
+            if (!Number.isSafeInteger(capacity) || capacity <= 0) {
+                throw new RangeError(`Invalid TLV input size: ${bytes.byteLength}`);
+            }
+            const address = this.module._malloc(capacity);
+            if (!address) throw new RangeError(`Could not allocate ${capacity} bytes of WASM input memory.`);
+            if (this.inputAddress) this.module._free(this.inputAddress);
+            this.inputAddress = address;
+            this.inputCapacity = capacity;
+        }
+        this.module.HEAPU8.set(bytes, this.inputAddress);
+        return demuxer.pushFromHeap(this.inputAddress, bytes.byteLength);
     }
 
     private fetch(url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
