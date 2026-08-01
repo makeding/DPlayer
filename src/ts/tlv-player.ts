@@ -220,6 +220,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         return this.demuxer?.applications() ?? [];
     }
 
+    broadcastClock(): createTlvDemuxModule.BroadcastClock | null {
+        return this.demuxer?.broadcastClock() ?? null;
+    }
+
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[] {
         return this.demuxer?.applicationResources(contextId ?? null) ?? [];
     }
@@ -439,6 +443,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
             onBroadcastClock: clock => this.bridge.emit('tlv_broadcast_clock', clock),
             onEventInfo: event => this.bridge.emit('tlv_event_info', event),
+            onStreamEvent: event => this.bridge.emit('tlv_stream_event', event),
             onApplicationResource: resource => this.bridge.emit('tlv_application_resource', resource),
             onApplicationState: state => this.bridge.emit('tlv_application_state', state),
             onApplicationResourcesReset: () => this.bridge.emit('tlv_application_resources_reset'),

@@ -14,7 +14,7 @@ export type VideoType = 'auto' | 'hls' | 'mpegts' | 'tlv' | 'flv' | 'dash' | 'we
 export type SubtitleType = 'webvtt' | 'aribb24' | 'aribb62';
 export type Events = VideoEvents | PlayerEvents;
 export type VideoEvents = 'abort' | 'canplay' | 'canplaythrough' | 'durationchange' | 'emptied' | 'ended' | 'error' | 'loadeddata' | 'loadedmetadata' | 'loadstart' | 'mozaudioavailable' | 'pause' | 'play' | 'playing' | 'progress' | 'ratechange' | 'seeked' | 'seeking' | 'stalled' | 'suspend' | 'timeupdate' | 'volumechange' | 'waiting';
-export type PlayerEvents = 'screenshot' | 'thumbnails_show' | 'thumbnails_hide' | 'danmaku_show' | 'danmaku_hide' | 'danmaku_clear' | 'danmaku_load_start' | 'danmaku_load_end' | 'danmaku_send' | 'danmaku_opacity' | 'contextmenu_show' | 'contextmenu_hide' | 'notice_show' | 'notice_hide' | 'quality_start' | 'quality_end' | 'destroy' | 'resize' | 'fullscreen' | 'fullscreen_cancel' | 'webfullscreen' | 'webfullscreen_cancel' | 'subtitle_show' | 'subtitle_hide' | 'subtitle_change' | 'tlv_ready' | 'tlv_error' | 'tlv_tracks' | 'tlv_track_change' | 'tlv_broadcast_clock' | 'tlv_event_info' | 'tlv_application_state' | 'tlv_application_resource' | 'tlv_application_resources_reset';
+export type PlayerEvents = 'screenshot' | 'thumbnails_show' | 'thumbnails_hide' | 'danmaku_show' | 'danmaku_hide' | 'danmaku_clear' | 'danmaku_load_start' | 'danmaku_load_end' | 'danmaku_send' | 'danmaku_opacity' | 'contextmenu_show' | 'contextmenu_hide' | 'notice_show' | 'notice_hide' | 'quality_start' | 'quality_end' | 'destroy' | 'resize' | 'fullscreen' | 'fullscreen_cancel' | 'webfullscreen' | 'webfullscreen_cancel' | 'subtitle_show' | 'subtitle_hide' | 'subtitle_change' | 'tlv_ready' | 'tlv_error' | 'tlv_tracks' | 'tlv_track_change' | 'tlv_broadcast_clock' | 'tlv_event_info' | 'tlv_stream_event' | 'tlv_application_state' | 'tlv_application_resource' | 'tlv_application_resources_reset';
 export type DanmakuType = 'top' | 'right' | 'bottom';
 export type DanmakuSize = 'big' | 'medium' | 'small';
 export type FullscreenType = 'browser' | 'web';
@@ -279,6 +279,7 @@ export interface TLVOptions {
 }
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
+export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
 export interface TLVPlugin {
     readonly tracks: readonly TLVTrackInfo[];
     seek(time: number): Promise<void>;
@@ -287,6 +288,8 @@ export interface TLVPlugin {
     selectSubtitleTrack(packetId: number): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
+    /** Latest media-to-broadcast-clock mapping, including one discovered before listeners attached. */
+    broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     setSubtitleVisible(visible: boolean): void;

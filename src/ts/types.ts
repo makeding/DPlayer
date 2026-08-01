@@ -72,6 +72,7 @@ export type PlayerEvents =
     'tlv_track_change' |
     'tlv_broadcast_clock' |
     'tlv_event_info' |
+    'tlv_stream_event' |
     'tlv_application_state' |
     'tlv_application_resource' |
     'tlv_application_resources_reset';
@@ -383,6 +384,7 @@ export interface TLVOptions {
 
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
+export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
 export interface TLVPlugin {
     readonly tracks: readonly TLVTrackInfo[];
     seek(time: number): Promise<void>;
@@ -391,6 +393,8 @@ export interface TLVPlugin {
     selectSubtitleTrack(packetId: number): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
+    /** Latest media-to-broadcast-clock mapping, including one discovered before listeners attached. */
+    broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     setSubtitleVisible(visible: boolean): void;
