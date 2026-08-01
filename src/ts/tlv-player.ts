@@ -12,6 +12,15 @@ const SOURCE_QUEUE_HIGH_BYTES = 4 * 1024 * 1024;
 
 type Module = createTlvDemuxModule.TlvDemuxModule;
 type Demuxer = createTlvDemuxModule.TlvDemuxer;
+type BrowserMediaSourceConstructor = typeof MediaSource;
+
+// iOS/iPadOS expose MSE through ManagedMediaSource instead of MediaSource.
+// Both APIs implement the same SourceBuffer-facing surface used below.
+const BrowserMediaSource = (
+    (globalThis as typeof globalThis & {
+        ManagedMediaSource?: BrowserMediaSourceConstructor;
+    }).ManagedMediaSource ?? globalThis.MediaSource
+);
 
 type PlayerBridge = {
     url: string;
@@ -37,7 +46,7 @@ class AppendQueue {
     private waiters: Array<() => void> = [];
 
     constructor(mediaSource: MediaSource, media: HTMLMediaElement, mime: string, onUpdate: () => void) {
-        if (!MediaSource.isTypeSupported(mime)) throw new Error(`Unsupported MSE type: ${mime}`);
+        if (!BrowserMediaSource?.isTypeSupported(mime)) throw new Error(`Unsupported MSE type: ${mime}`);
         this.mime = mime;
         this.mediaSource = mediaSource;
         this.media = media;
@@ -313,14 +322,18 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     private async openMediaSource(): Promise<void> {
-        const mediaSource = new MediaSource();
-        this.mediaSource = mediaSource;
-        this.mediaUrl = URL.createObjectURL(mediaSource);
-        this.bridge.video.src = this.mediaUrl;
-        await new Promise<void>((resolve, reject) => {
+        if (!BrowserMediaSource) throw new Error('Media Source Extensions are not supported.');
+        const mediaSource = new BrowserMediaSource();
+        // Register before attaching the object URL. WebKit may transition to
+        // open before code after setting video.src gets another turn.
+        const opened = new Promise<void>((resolve, reject) => {
             mediaSource.addEventListener('sourceopen', () => resolve(), {once: true});
             mediaSource.addEventListener('sourceclose', () => reject(new Error('MediaSource closed before opening.')), {once: true});
         });
+        this.mediaSource = mediaSource;
+        this.mediaUrl = URL.createObjectURL(mediaSource);
+        this.bridge.video.src = this.mediaUrl;
+        await opened;
     }
 
     private async consumeSource(startTimeSeconds: number, generation: number, signal: AbortSignal): Promise<void> {
