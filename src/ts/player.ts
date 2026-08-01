@@ -839,7 +839,8 @@ class DPlayer {
                     // Raw TLV はブラウザが直接再生できないため、video.src には渡さず
                     // tlvdemux が構築する MediaSource の URL だけを後から設定する。
                     const sourceUrl = video.dataset.tlvSrc || video.src;
-                    if (!('MediaSource' in window) || !window.fetch || !sourceUrl) {
+                    const mediaSourceSupported = 'ManagedMediaSource' in window || 'MediaSource' in window;
+                    if (!mediaSourceSupported || !window.fetch || !sourceUrl) {
                         this.notice('Error: MMT/TLV playback is not supported.', undefined, undefined, '#FF6F6A');
                         break;
                     }
