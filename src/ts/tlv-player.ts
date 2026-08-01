@@ -16,11 +16,10 @@ type BrowserMediaSourceConstructor = typeof MediaSource;
 
 // iOS/iPadOS expose MSE through ManagedMediaSource instead of MediaSource.
 // Both APIs implement the same SourceBuffer-facing surface used below.
-const BrowserMediaSource = (
-    (globalThis as typeof globalThis & {
-        ManagedMediaSource?: BrowserMediaSourceConstructor;
-    }).ManagedMediaSource ?? globalThis.MediaSource
-);
+const BrowserManagedMediaSource = (globalThis as typeof globalThis & {
+    ManagedMediaSource?: BrowserMediaSourceConstructor;
+}).ManagedMediaSource;
+const BrowserMediaSource = BrowserManagedMediaSource ?? globalThis.MediaSource;
 
 type PlayerBridge = {
     url: string;
@@ -332,6 +331,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.mediaSource = mediaSource;
         this.mediaUrl = URL.createObjectURL(mediaSource);
+        // WebKit only activates ManagedMediaSource when an AirPlay fallback is
+        // present or remote playback is explicitly disabled. Raw TLV has no
+        // native AirPlay source, so opt out before attaching the object URL.
+        if (BrowserManagedMediaSource && mediaSource instanceof BrowserManagedMediaSource) {
+            this.bridge.video.disableRemotePlayback = true;
+        }
         this.bridge.video.src = this.mediaUrl;
         await opened;
     }
