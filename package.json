@@ -90,6 +90,7 @@
         "webpack": "^5.93.0",
         "webpack-cli": "^5.1.4",
         "webpack-dev-server": "^5.2.1",
+        "worker-loader": "^3.0.8",
         "yorkie": "^2.0.0"
     },
     "gitHooks": {

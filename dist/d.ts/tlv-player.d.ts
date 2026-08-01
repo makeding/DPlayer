@@ -1,5 +1,5 @@
 import * as aribb62js from 'aribb62.js';
-import createTlvDemuxModule from 'tlvdemux';
+import type createTlvDemuxModule from 'tlvdemux';
 import type * as DPlayerType from './types';
 type PlayerBridge = {
     url: string;
@@ -17,7 +17,8 @@ type PlayerBridge = {
 export default class TLVPlayer implements DPlayerType.TLVPlugin {
     readonly tracks: DPlayerType.TLVTrackInfo[];
     private readonly bridge;
-    private module;
+    private worker;
+    private workerReady;
     private demuxer;
     private mediaSource;
     private mediaUrl;
@@ -37,8 +38,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private destroyed;
     private playingStarted;
     private pendingSeekTime;
-    private inputAddress;
-    private inputCapacity;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
@@ -59,9 +58,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private discoverSourceSize;
     private probeDuration;
     private fetchRange;
-    private pushBytes;
     private fetch;
-    private drainApplications;
     private createSubtitleRenderer;
     private maybeStartPlayback;
     private applyBackpressure;

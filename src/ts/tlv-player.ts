@@ -1,7 +1,8 @@
 import * as aribb62js from 'aribb62.js';
-import createTlvDemuxModule from 'tlvdemux';
+import type createTlvDemuxModule from 'tlvdemux';
 
 import type * as DPlayerType from './types';
+import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
 const MiB = 1024n * 1024n;
 const CHUNK_SIZE = 2n * MiB;
@@ -13,8 +14,7 @@ const LIVE_CHUNK_TARGET_BYTES = 512 * 1024;
 const LIVE_CHUNK_MAX_DELAY_MILLISECONDS = 25;
 const BACK_BUFFER_TRIM_GRANULARITY_SECONDS = 2;
 
-type Module = createTlvDemuxModule.TlvDemuxModule;
-type Demuxer = createTlvDemuxModule.TlvDemuxer;
+type Demuxer = WorkerDemuxer;
 type BrowserMediaSourceConstructor = typeof MediaSource;
 
 function joinChunks(chunks: Uint8Array[], byteLength: number): Uint8Array {
@@ -237,7 +237,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     readonly tracks: DPlayerType.TLVTrackInfo[] = [];
 
     private readonly bridge: PlayerBridge;
-    private module: Module | null = null;
+    private worker: TlvWorkerClient | null = null;
+    private workerReady = false;
     private demuxer: Demuxer | null = null;
     private mediaSource: MediaSource | null = null;
     private mediaUrl: string | null = null;
@@ -257,8 +258,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private destroyed = false;
     private playingStarted = false;
     private pendingSeekTime: number | null = null;
-    private inputAddress = 0;
-    private inputCapacity = 0;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -272,7 +271,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (this.bridge.live || this.destroyed) return;
         // tlvdemux WASM のロード中に受け取った初回位置は捨てず、初回の MSE 構築に直接使う。
         // これにより 0 秒の串流を一度開始してから再シークする競合自体を発生させない。
-        if (this.module === null) {
+        if (!this.workerReady) {
             this.pendingSeekTime = time;
             return;
         }
@@ -283,8 +282,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.preferredVideoPacketId = packetId;
         const track = this.trackByPacket('video', packetId);
         if (!track || !this.demuxer) return;
+        const demuxer = this.demuxer;
         this.selectedTrackIds.set('video', track.trackId);
-        this.demuxer.selectTrack('video', track.trackId);
+        void demuxer.selectTrack('video', track.trackId).catch(error => {
+            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
+        });
         this.bridge.emit('tlv_track_change', {kind: 'video', track});
     }
 
@@ -304,8 +306,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.preferredSubtitlePacketId = packetId;
         const track = this.trackByPacket('subtitle', packetId);
         if (!track || !this.demuxer) return;
+        const demuxer = this.demuxer;
         this.selectedTrackIds.set('subtitle', track.trackId);
-        this.demuxer.selectTrack('subtitle', track.trackId);
+        void demuxer.selectTrack('subtitle', track.trackId).catch(error => {
+            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
+        });
         this.renderer?.reset();
         this.bridge.emit('tlv_track_change', {kind: 'subtitle', track});
     }
@@ -323,7 +328,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[] {
-        return this.demuxer?.applicationResources(contextId ?? null) ?? [];
+        return this.demuxer?.applicationResources(contextId) ?? [];
     }
 
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null {
@@ -356,9 +361,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.abortController?.abort();
         this.demuxer?.delete();
         this.demuxer = null;
-        if (this.module && this.inputAddress) this.module._free(this.inputAddress);
-        this.inputAddress = 0;
-        this.inputCapacity = 0;
+        this.worker?.close();
+        this.worker = null;
         this.renderer?.destroy();
         this.renderer = null;
         this.subtitleOverlay?.remove();
@@ -368,7 +372,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private async initialize(): Promise<void> {
         try {
-            this.module = await createTlvDemuxModule();
+            if (typeof Worker === 'undefined') throw new Error('This browser does not support Web Workers.');
+            this.worker = new TlvWorkerClient();
+            await this.worker.ready;
+            this.workerReady = true;
             if (this.destroyed) return;
             // WASM のロード中に要求された視聴履歴位置があれば、0 秒を経由せずその位置から開始する。
             const initialSeekTime = this.pendingSeekTime ?? 0;
@@ -376,12 +383,20 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             await this.restart(initialSeekTime);
             if (!this.destroyed) this.bridge.emit('tlv_ready', this);
         } catch (error) {
-            this.fail(error);
+            if (this.destroyed) return;
+            this.workerReady = false;
+            this.worker?.close();
+            this.worker = null;
+            if (error instanceof DOMException && error.name === 'SecurityError') {
+                this.fail(new Error("TLV Worker was blocked by browser policy; allow blob: in Content-Security-Policy worker-src."));
+            } else {
+                this.fail(error);
+            }
         }
     }
 
     private async restart(startTimeSeconds: number): Promise<void> {
-        if (!this.module || this.destroyed) return;
+        if (!this.workerReady || this.destroyed) return;
         const generation = ++this.generation;
         this.abortController?.abort();
         const controller = new AbortController();
@@ -447,6 +462,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // 先頭解析中の RAP をシーク候補として扱うと、どの要求時刻でもファイル先頭付近から再生してしまう。
         // demo と同じく、推定位置へ reposition() した後の明示的な probe 中だけ RAP を採用する。
         let seekProbe = false;
+        const active = (): boolean => generation === this.generation && !this.destroyed;
 
         const installInits = (): void => {
             if (!this.mediaSource || this.queueByType.size > 0 || !pendingInits.has('video') || !pendingInits.has('audio')) return;
@@ -467,8 +483,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             else pendingSegments.get(type)?.push(data);
         };
 
-        const demuxer = new this.module!.TlvDemuxer({
+        const demuxer = this.worker!.createDemuxer({
+            onMseVideoStart: () => {
+                if (!active()) return;
+                if (!seekProbe) headVideoSeen = true;
+            },
             onMseInit: init => {
+                if (!active()) return;
                 try {
                     const queue = this.queueByType.get(init.type);
                     if (queue) {
@@ -483,6 +504,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 }
             },
             onMseSegment: segment => {
+                if (!active()) return;
                 try {
                     appendSegment(segment.type, segment.data);
                 } catch (error) {
@@ -490,6 +512,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 }
             },
             onTrack: track => {
+                if (!active()) return;
                 // MMT のテーブル更新で同じトラックが再通知されることがある。
                 // packet_id は同一 service 内のトラック識別子なので、既存項目を更新して重複させない。
                 const track_index = this.tracks.findIndex(candidate => candidate.packetId === track.packetId);
@@ -498,13 +521,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 if (track.kind === 'video' && !this.selectedTrackIds.has('video') &&
                     (this.preferredVideoPacketId === null || track.packetId === this.preferredVideoPacketId)) {
                     this.selectedTrackIds.set('video', track.trackId);
-                    demuxer.selectTrack('video', track.trackId);
-                    if (this.durationUs !== null) demuxer.setIndexDuration(this.durationUs);
                 } else if (track.kind === 'audio' && !this.selectedTrackIds.has('audio') &&
                     (this.preferredAudioPacketId === null ? this.isMseCompatibleAudioTrack(track) :
                         track.packetId === this.preferredAudioPacketId)) {
                     this.selectedTrackIds.set('audio', track.trackId);
-                    demuxer.selectTrack('audio', track.trackId);
                 } else if (track.kind === 'subtitle' && track.codec === 'ttml') {
                     const currentSubtitleTrackId = this.selectedTrackIds.get('subtitle');
                     const currentSubtitleTrack = this.tracks.find(candidate => candidate.trackId === currentSubtitleTrackId);
@@ -518,13 +538,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     if (shouldSelectSubtitle) {
                         this.selectedTrackIds.set('subtitle', track.trackId);
                         selectedSubtitleTrack = track;
-                        demuxer.selectTrack('subtitle', track.trackId);
                         this.renderer?.reset();
                     }
                 }
                 this.bridge.emit('tlv_tracks', [...this.tracks]);
             },
             onAccessUnitView: unit => {
+                if (!active()) return;
                 try {
                     if (unit.trackId === this.selectedTrackIds.get('video')) {
                         if (seekProbe && unit.randomAccess && seekRap === null) {
@@ -590,21 +610,41 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     callbackError = error;
                 }
             },
-            onBroadcastClock: clock => this.bridge.emit('tlv_broadcast_clock', clock),
-            onEventInfo: event => this.bridge.emit('tlv_event_info', event),
-            onStreamEvent: event => this.bridge.emit('tlv_stream_event', event),
-            onApplicationResource: resource => this.bridge.emit('tlv_application_resource', resource),
-            onApplicationState: state => this.bridge.emit('tlv_application_state', state),
-            onApplicationResourcesReset: () => this.bridge.emit('tlv_application_resources_reset'),
+            onBroadcastClock: clock => {
+                if (active()) this.bridge.emit('tlv_broadcast_clock', clock);
+            },
+            onEventInfo: event => {
+                if (active()) this.bridge.emit('tlv_event_info', event);
+            },
+            onStreamEvent: event => {
+                if (active()) this.bridge.emit('tlv_stream_event', event);
+            },
+            onApplicationResource: resource => {
+                if (active()) this.bridge.emit('tlv_application_resource', resource);
+            },
+            onApplicationState: state => {
+                if (active()) this.bridge.emit('tlv_application_state', state);
+            },
+            onApplicationResourcesReset: () => {
+                if (active()) this.bridge.emit('tlv_application_resources_reset');
+            },
             onError: error => {
+                if (!active()) return;
                 if (!error.recoverable) callbackError = new Error(error.message);
             },
+        }, {
+            videoPacketId: this.preferredVideoPacketId,
+            audioPacketId: this.preferredAudioPacketId,
+            subtitlePacketId: this.preferredSubtitlePacketId,
+            mseMaxAudioChannels: 8,
+            indexDurationUs: this.durationUs,
         });
         this.demuxer = demuxer;
+        await demuxer.initialized();
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
-        demuxer.setSubtitlePassthroughEnabled(true);
-        if (!this.bridge.live) demuxer.startIndex(false);
+        await demuxer.setSubtitlePassthroughEnabled(true);
+        if (!this.bridge.live) await demuxer.startIndex(false);
 
         let offset = 0n;
         if (!this.bridge.live && startTimeSeconds > 0 && this.sourceSize !== null && this.durationUs !== null) {
@@ -614,28 +654,27 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     (!pendingInits.has('video') || !pendingInits.has('audio') || !headVideoSeen);
                  headOffset += CHUNK_SIZE) {
                 const size = headSize - headOffset < CHUNK_SIZE ? headSize - headOffset : CHUNK_SIZE;
-                if (!this.pushBytes(demuxer, await this.fetchRange(headOffset, size, signal))) {
+                if (!await demuxer.push(await this.fetchRange(headOffset, size, signal))) {
                     throw new Error('TLV head parsing failed.');
                 }
-                this.drainApplications(demuxer, generation);
                 if (callbackError) throw callbackError;
             }
             if (!pendingInits.has('video') || !pendingInits.has('audio') || !headVideoSeen) {
                 throw new Error('TLV head parsing found no MSE audio/video initialization pair or video access unit.');
             }
-            demuxer.setMseOutputEnabled(false);
+            await demuxer.setMseOutputEnabled(false);
             const targetUs = BigInt(Math.round(startTimeSeconds * 1000000));
-            const estimate = demuxer.estimateOffset(targetUs, this.sourceSize);
+            const estimate = await demuxer.estimateOffset(targetUs, this.sourceSize);
             if (estimate === null) throw new Error('TLV seek offset could not be estimated.');
             const candidate = estimate > SEEK_PREROLL_SIZE ? estimate - SEEK_PREROLL_SIZE : 0n;
             seekRap = null;
             seekProbe = true;
-            demuxer.reposition(candidate, true);
+            await demuxer.reposition(candidate, true);
             let probeOffset = candidate;
             const probeEnd = candidate + SEEK_PREROLL_SIZE < this.sourceSize ? candidate + SEEK_PREROLL_SIZE : this.sourceSize;
             while (seekRap === null && probeOffset < probeEnd) {
                 const size = probeEnd - probeOffset < CHUNK_SIZE ? probeEnd - probeOffset : CHUNK_SIZE;
-                if (!this.pushBytes(demuxer, await this.fetchRange(probeOffset, size, signal))) {
+                if (!await demuxer.push(await this.fetchRange(probeOffset, size, signal))) {
                     throw new Error('TLV seek probe failed.');
                 }
                 probeOffset += size;
@@ -644,11 +683,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             if (resolvedSeekRap === null) throw new Error('TLV seek found no random access point.');
             offset = resolvedSeekRap.restartOffset;
             seekProbe = false;
-            demuxer.reposition(offset, true);
+            await demuxer.reposition(offset, true);
             // 探索中に構築された字幕内部状態を破棄し、シーク先の字幕だけを新しい時刻軸で受け取る。
             this.renderer?.reset();
             discardPendingSegments = false;
-            demuxer.setMseOutputEnabled(true);
+            await demuxer.setMseOutputEnabled(true);
             this.bridge.video.currentTime = startTimeSeconds;
         }
 
@@ -658,27 +697,24 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             const reader = response.body.getReader();
             for await (const data of coalesceLiveStream(reader)) {
                 if (generation !== this.generation) break;
-                if (!this.pushBytes(demuxer, data)) throw new Error('TLV live demux failed.');
-                this.drainApplications(demuxer, generation);
+                if (!await demuxer.push(data)) throw new Error('TLV live demux failed.');
                 if (callbackError) throw callbackError;
                 await this.applyBackpressure();
             }
         } else if (this.sourceSize !== null) {
             while (offset < this.sourceSize && generation === this.generation) {
                 const size = this.sourceSize - offset < CHUNK_SIZE ? this.sourceSize - offset : CHUNK_SIZE;
-                if (!this.pushBytes(demuxer, await this.fetchRange(offset, size, signal))) {
+                if (!await demuxer.push(await this.fetchRange(offset, size, signal))) {
                     throw new Error(`TLV demux failed at ${offset}.`);
                 }
                 offset += size;
-                this.drainApplications(demuxer, generation);
                 if (callbackError) throw callbackError;
                 await this.applyBackpressure();
             }
         }
         if (generation !== this.generation) return;
-        demuxer.flush();
-        while (demuxer.drainApplicationResources(256)) await new Promise(resolve => window.setTimeout(resolve, 0));
-        if (!this.bridge.live) demuxer.finalizeIndex();
+        await demuxer.flush();
+        if (!this.bridge.live) await demuxer.finalizeIndex();
         await Promise.all(this.queues.map(queue => queue.waitIdle()));
         if (this.mediaSource?.readyState === 'open') this.mediaSource.endOfStream();
     }
@@ -694,21 +730,24 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     private async probeDuration(sourceSize: bigint, signal: AbortSignal): Promise<bigint> {
-        const probe = new this.module!.DurationProbe();
+        const probe = this.worker!.createDurationProbe();
         try {
-            if (!probe.begin(sourceSize, {initialRangeSize: INITIAL_PROBE_SIZE, maxRangeSize: MAX_PROBE_SIZE})) {
+            if (!await probe.begin(sourceSize, {initialRangeSize: INITIAL_PROBE_SIZE, maxRangeSize: MAX_PROBE_SIZE})) {
                 throw new Error('TLV duration probe could not start.');
             }
             for (;;) {
-                const request = probe.nextRange();
+                const request = await probe.nextRange();
                 if (request === null) break;
                 const bytes = await this.fetchRange(request.offset, request.length, signal);
-                if (!probe.pushRange(request.requestId, request.offset, bytes, true)) {
+                if (!await probe.pushRange(request.requestId, request.offset, bytes, true)) {
                     throw new Error('TLV duration probe rejected a byte range.');
                 }
             }
-            const duration = probe.duration();
-            if (!duration || probe.state() !== 'complete') throw new Error(`TLV duration is unavailable: ${probe.failure()}`);
+            const duration = await probe.duration();
+            const state = await probe.state();
+            if (!duration || state !== 'complete') {
+                throw new Error(`TLV duration is unavailable: ${await probe.failure()}`);
+            }
             return duration.value * 1000000n / BigInt(duration.timescale);
         } finally {
             probe.delete();
@@ -726,38 +765,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         return data;
     }
 
-    private pushBytes(demuxer: Demuxer, bytes: Uint8Array): boolean {
-        if (!this.module) return false;
-        if (bytes.byteLength === 0) return demuxer.pushFromHeap(0, 0);
-        if (bytes.byteLength > this.inputCapacity) {
-            const allocationUnit = 64 * 1024;
-            const capacity = Math.ceil(bytes.byteLength / allocationUnit) * allocationUnit;
-            if (!Number.isSafeInteger(capacity) || capacity <= 0) {
-                throw new RangeError(`Invalid TLV input size: ${bytes.byteLength}`);
-            }
-            const address = this.module._malloc(capacity);
-            if (!address) throw new RangeError(`Could not allocate ${capacity} bytes of WASM input memory.`);
-            if (this.inputAddress) this.module._free(this.inputAddress);
-            this.inputAddress = address;
-            this.inputCapacity = capacity;
-        }
-        this.module.HEAPU8.set(bytes, this.inputAddress);
-        return demuxer.pushFromHeap(this.inputAddress, bytes.byteLength);
-    }
-
     private fetch(url: string, init: RequestInit, signal: AbortSignal): Promise<Response> {
         const configured = this.bridge.options.fetch ?? {};
         const headers = new Headers(configured.headers);
         new Headers(init.headers).forEach((value, key) => headers.set(key, value));
         return window.fetch(url, {...configured, ...init, headers, signal});
-    }
-
-    private drainApplications(demuxer: Demuxer, generation: number): void {
-        const run = (): void => {
-            if (generation !== this.generation || this.destroyed) return;
-            if (demuxer.drainApplicationResources(32)) window.setTimeout(run, 0);
-        };
-        window.setTimeout(run, 0);
     }
 
     private createSubtitleRenderer(): void {
