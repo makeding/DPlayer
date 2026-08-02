@@ -738,8 +738,14 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             for (;;) {
                 const request = await probe.nextRange();
                 if (request === null) break;
-                const bytes = await this.fetchRange(request.offset, request.length, signal);
-                if (!await probe.pushRange(request.requestId, request.offset, bytes, true)) {
+                // Some browser/worker combinations deserialize WebAssembly i64
+                // object fields as numbers even though direct embind calls return
+                // bigint. Normalize the RPC boundary before doing BigInt arithmetic.
+                const requestId = BigInt(request.requestId);
+                const offset = BigInt(request.offset);
+                const length = BigInt(request.length);
+                const bytes = await this.fetchRange(offset, length, signal);
+                if (!await probe.pushRange(requestId, offset, bytes, true)) {
                     throw new Error('TLV duration probe rejected a byte range.');
                 }
             }
@@ -754,7 +760,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         }
     }
 
-    private async fetchRange(offset: bigint, length: bigint, signal: AbortSignal): Promise<Uint8Array> {
+    private async fetchRange(offsetValue: bigint | number, lengthValue: bigint | number,
+                             signal: AbortSignal): Promise<Uint8Array> {
+        const offset = BigInt(offsetValue);
+        const length = BigInt(lengthValue);
         const end = offset + length - 1n;
         const response = await this.fetch(this.bridge.url, {
             headers: {Range: `bytes=${offset}-${end}`},
