@@ -133,7 +133,10 @@ class WorkerClient {
         if (!pending) return;
         this.pending.delete(message.requestId);
         if (message.type === 'failure') pending.reject(remoteError(message.error));
-        else pending.resolve(message.value ?? true);
+        // null is a meaningful RPC result (for example DurationProbe.nextRange()
+        // returns null when probing is complete), so only synthesize true when
+        // the worker omitted the value field entirely.
+        else pending.resolve(message.value === undefined ? true : message.value);
     }
 
     private updateCache(cache: ObjectCache, name: string, value: unknown): void {
