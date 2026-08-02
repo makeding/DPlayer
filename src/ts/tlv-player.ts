@@ -1,5 +1,6 @@
 import * as aribb62js from 'aribb62.js';
 import type createTlvDemuxModule from 'tlvdemux';
+import {MseAppendQueue} from 'tlvdemux/mse-append-queue';
 
 import type * as DPlayerType from './types';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
@@ -12,7 +13,6 @@ const SEEK_PREROLL_SIZE = 64n * MiB;
 const SOURCE_QUEUE_HIGH_BYTES = 4 * 1024 * 1024;
 const LIVE_CHUNK_TARGET_BYTES = 512 * 1024;
 const LIVE_CHUNK_MAX_DELAY_MILLISECONDS = 25;
-const BACK_BUFFER_TRIM_GRANULARITY_SECONDS = 2;
 
 type Demuxer = WorkerDemuxer;
 type BrowserMediaSourceConstructor = typeof MediaSource;
@@ -104,114 +104,6 @@ type PlayerBridge = {
     notice: (message: string) => void;
 };
 
-class AppendQueue {
-    readonly mime: string;
-    private readonly mediaSource: MediaSource;
-    private readonly sourceBuffer: SourceBuffer;
-    private readonly media: HTMLMediaElement;
-    private readonly pending: Uint8Array[] = [];
-    private pendingBytes = 0;
-    private stopped = false;
-    private waiters: Array<() => void> = [];
-    private trimBeforeTime: number | null = null;
-
-    constructor(mediaSource: MediaSource, media: HTMLMediaElement, mime: string, onUpdate: () => void) {
-        if (!BrowserMediaSource?.isTypeSupported(mime)) throw new Error(`Unsupported MSE type: ${mime}`);
-        this.mime = mime;
-        this.mediaSource = mediaSource;
-        this.media = media;
-        this.sourceBuffer = mediaSource.addSourceBuffer(mime);
-        this.sourceBuffer.mode = 'segments';
-        this.sourceBuffer.addEventListener('updateend', () => {
-            this.pump();
-            onUpdate();
-        });
-        this.sourceBuffer.addEventListener('error', () => this.stop());
-        mediaSource.addEventListener('sourceclose', () => this.stop());
-    }
-
-    append(data: Uint8Array): void {
-        if (this.stopped) return;
-        this.pending.push(data);
-        this.pendingBytes += data.byteLength;
-        this.pump();
-    }
-
-    bufferedRanges(): Array<{start: number; end: number}> {
-        const result: Array<{start: number; end: number}> = [];
-        for (let index = 0; index < this.sourceBuffer.buffered.length; index += 1) {
-            result.push({
-                start: this.sourceBuffer.buffered.start(index),
-                end: this.sourceBuffer.buffered.end(index),
-            });
-        }
-        return result;
-    }
-
-    trimBefore(time: number): void {
-        if (this.stopped || !(time > 0)) return;
-        this.trimBeforeTime = Math.max(this.trimBeforeTime ?? 0, time);
-        this.pump();
-    }
-
-    async waitBelow(limit: number): Promise<void> {
-        if (this.pendingBytes <= limit || this.stopped) return;
-        await new Promise<void>(resolve => this.waiters.push(resolve));
-    }
-
-    async waitIdle(): Promise<void> {
-        while (!this.stopped && (this.sourceBuffer.updating || this.pending.length > 0)) {
-            await new Promise<void>(resolve => this.waiters.push(resolve));
-        }
-    }
-
-    stop(): void {
-        this.stopped = true;
-        this.pending.length = 0;
-        this.pendingBytes = 0;
-        this.resolveWaiters();
-    }
-
-    private pump(): void {
-        if (this.stopped || this.sourceBuffer.updating) return;
-        if (this.pending.length === 0 && this.trimBeforeTime === null) {
-            this.resolveWaiters();
-            return;
-        }
-        // Chromium は decoder 初期化失敗や品質・音声切り替えで MediaSource を閉じた直後にも
-        // 古い updateend を配送することがある。親から外れた SourceBuffer へ appendBuffer() しない。
-        if (this.mediaSource.readyState !== 'open' ||
-            Array.from(this.mediaSource.sourceBuffers).includes(this.sourceBuffer) === false) {
-            this.stop();
-            return;
-        }
-        if (this.trimBeforeTime !== null && this.sourceBuffer.buffered.length > 0) {
-            const start = this.sourceBuffer.buffered.start(0);
-            const end = Math.min(
-                this.trimBeforeTime,
-                this.sourceBuffer.buffered.end(this.sourceBuffer.buffered.length - 1),
-            );
-            if (end > start + BACK_BUFFER_TRIM_GRANULARITY_SECONDS) {
-                this.trimBeforeTime = null;
-                this.sourceBuffer.remove(start, end);
-                return;
-            }
-        }
-        if (this.pending.length === 0) {
-            this.resolveWaiters();
-            return;
-        }
-        const data = this.pending.shift()!;
-        this.pendingBytes -= data.byteLength;
-        this.sourceBuffer.appendBuffer(data as Uint8Array<ArrayBuffer>);
-        if (this.pendingBytes <= SOURCE_QUEUE_HIGH_BYTES) this.resolveWaiters();
-    }
-
-    private resolveWaiters(): void {
-        for (const resolve of this.waiters.splice(0)) resolve();
-    }
-}
-
 function intersectRanges(
     left: Array<{start: number; end: number}>,
     right: Array<{start: number; end: number}>,
@@ -242,8 +134,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private demuxer: Demuxer | null = null;
     private mediaSource: MediaSource | null = null;
     private mediaUrl: string | null = null;
-    private queues: AppendQueue[] = [];
-    private queueByType = new Map<string, AppendQueue>();
+    private queues: MseAppendQueue[] = [];
+    private queueByType = new Map<string, MseAppendQueue>();
     private renderer: aribb62js.B62TTMLRenderer | null = null;
     private subtitleOverlay: HTMLElement | null = null;
     private abortController: AbortController | null = null;
@@ -468,7 +360,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             if (!this.mediaSource || this.queueByType.size > 0 || !pendingInits.has('video') || !pendingInits.has('audio')) return;
             for (const type of ['video', 'audio']) {
                 const init = pendingInits.get(type)!;
-                const queue = new AppendQueue(this.mediaSource, this.bridge.video, init.mime, () => this.maybeStartPlayback());
+                const queue = new MseAppendQueue(
+                    this.mediaSource,
+                    this.bridge.video,
+                    init.mime,
+                    () => this.maybeStartPlayback(),
+                    {
+                        backBufferSeconds: this.bridge.options.backBufferSeconds ?? (this.bridge.live ? 45 : 8),
+                        forwardBufferHighSeconds: this.bridge.options.forwardBufferSeconds ?? (this.bridge.live ? 8 : 15),
+                    },
+                );
                 this.queueByType.set(type, queue);
                 this.queues.push(queue);
                 queue.append(init.data);
