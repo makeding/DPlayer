@@ -1,7 +1,21 @@
 import type createTlvDemuxModule from 'tlvdemux';
 import InlineTlvWorker from 'worker-loader?inline=no-fallback!./tlv-worker';
 
-type Callbacks = createTlvDemuxModule.TlvDemuxOptions;
+type ViewerParticipationNotification = {
+    contextId: number;
+    sourcePacketId: number;
+    eventMessageTag: number;
+    dataEventId: number;
+    messageGroupId: number;
+    version: number;
+    currentNext: boolean;
+    sectionNumber: number;
+    lastSectionNumber: number;
+    inputOffset: bigint;
+};
+type Callbacks = createTlvDemuxModule.TlvDemuxOptions & {
+    onViewerParticipationNotification?: (notification: ViewerParticipationNotification) => void;
+};
 type TrackKind = createTlvDemuxModule.TrackKind;
 
 type SelectionOptions = {

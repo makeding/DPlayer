@@ -619,6 +619,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onStreamEvent: event => {
                 if (active()) this.bridge.emit('tlv_stream_event', event);
             },
+            onViewerParticipationNotification: notification => {
+                if (active()) this.bridge.emit('tlv_viewer_participation', notification);
+            },
             onApplicationResource: resource => {
                 if (active()) this.bridge.emit('tlv_application_resource', resource);
             },

@@ -5,6 +5,18 @@ const scope = globalThis as unknown as {
     onmessage: ((event: MessageEvent) => void) | null;
 };
 const applicationDrainBatch = 32;
+type ViewerParticipationNotification = {
+    contextId: number;
+    sourcePacketId: number;
+    eventMessageTag: number;
+    dataEventId: number;
+    messageGroupId: number;
+    version: number;
+    currentNext: boolean;
+    sectionNumber: number;
+    lastSectionNumber: number;
+    inputOffset: bigint;
+};
 const objects = new Map<number, Record<string, any>>();
 const modulePromise = createTlvDemuxModule();
 let operationQueue = Promise.resolve();
@@ -90,7 +102,9 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
         },
     };
     const event = (name: string) => (value?: unknown): void => sendEvent(objectId, name, value);
-    record.instance = new module.TlvDemuxer({
+    const callbacks: createTlvDemuxModule.TlvDemuxOptions & {
+        onViewerParticipationNotification?: (notification: ViewerParticipationNotification) => void;
+    } = {
         mseMaxAudioChannels: record.selection.maxAudioChannels,
         onMseVideoStart: event('onMseVideoStart'),
         onMseInit(init) { sendEvent(objectId, 'onMseInit', init, [init.data.buffer]); },
@@ -102,6 +116,7 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
         onBroadcastClock: event('onBroadcastClock'),
         onEventInfo: event('onEventInfo'),
         onStreamEvent: event('onStreamEvent'),
+        onViewerParticipationNotification: event('onViewerParticipationNotification'),
         onApplicationResourceView(resource) {
             const data = copyBytes(resource.data);
             sendEvent(objectId, 'onApplicationResource', {
@@ -119,7 +134,8 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
         onApplicationResourcesReset: event('onApplicationResourcesReset'),
         onPlaybackAccessUnitView(unit) { transferAccessUnit(objectId, unit); },
         onError: event('onError'),
-    });
+    };
+    record.instance = new module.TlvDemuxer(callbacks);
     return record;
 }
 

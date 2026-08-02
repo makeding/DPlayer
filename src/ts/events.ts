@@ -67,6 +67,7 @@ class Events {
             'tlv_broadcast_clock',
             'tlv_event_info',
             'tlv_stream_event',
+            'tlv_viewer_participation',
             'tlv_application_state',
             'tlv_application_resource',
             'tlv_application_resources_reset',

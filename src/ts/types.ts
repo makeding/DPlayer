@@ -74,6 +74,7 @@ export type PlayerEvents =
     'tlv_broadcast_clock' |
     'tlv_event_info' |
     'tlv_stream_event' |
+    'tlv_viewer_participation' |
     'tlv_application_state' |
     'tlv_application_resource' |
     'tlv_application_resources_reset';
@@ -386,6 +387,18 @@ export interface TLVOptions {
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
+export interface TLVViewerParticipationNotification {
+    contextId: number;
+    sourcePacketId: number;
+    eventMessageTag: number;
+    dataEventId: number;
+    messageGroupId: number;
+    version: number;
+    currentNext: boolean;
+    sectionNumber: number;
+    lastSectionNumber: number;
+    inputOffset: bigint;
+}
 export interface TLVCaptionData {
     trackId: bigint;
     packetId: number;
