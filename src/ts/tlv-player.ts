@@ -1,6 +1,6 @@
 import * as aribb62js from 'aribb62.js';
 import type createTlvDemuxModule from 'tlvdemux';
-import {MseAppendQueue} from 'tlvdemux/mse-append-queue';
+import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue';
 
 import type * as DPlayerType from './types';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
@@ -344,6 +344,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const pendingInits = new Map<string, createTlvDemuxModule.MseTrackInit>();
         const pendingSegments = new Map<string, Uint8Array[]>([['video', []], ['audio', []]]);
         let callbackError: unknown = null;
+        let incompleteInputTail = false;
         // VOD シークでは先頭をインデックス作成用に読む一方、その区間の media segment は再生してはいけない。
         // ただし MSE 出力全体を無効にすると audio init まで失われ、SourceBuffer を作れないままファイル末尾まで
         // Range 読み込みを続けてしまうため、init だけを保持して media segment は明示的に捨てる。
@@ -535,6 +536,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onError: error => {
                 if (!active()) return;
                 if (!error.recoverable) callbackError = new Error(error.message);
+                else if (/^incomplete TLV (header|payload) at end of input$/.test(error.message)) {
+                    incompleteInputTail = true;
+                }
             },
         }, {
             videoPacketId: this.preferredVideoPacketId,
@@ -619,8 +623,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (generation !== this.generation) return;
         await demuxer.flush();
         if (!this.bridge.live) await demuxer.finalizeIndex();
-        await Promise.all(this.queues.map(queue => queue.waitIdle()));
-        if (this.mediaSource?.readyState === 'open') this.mediaSource.endOfStream();
+        if (this.mediaSource) {
+            await finalizeMseMediaSource(this.mediaSource, this.queues, {
+                truncateToCommonEnd: !this.bridge.live && incompleteInputTail,
+            });
+        }
     }
 
     private async discoverSourceSize(signal: AbortSignal): Promise<bigint> {
