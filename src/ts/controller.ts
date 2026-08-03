@@ -8,6 +8,8 @@ class Controller {
     disableAutoHide = false;
     autoHideTimer: number;
     mobileSkipTimer: number;
+    mobileSkipSeekTimer: number;
+    mobileSkipTargetTime: number | null;
     mobileBackwardTime: number;
     mobileForwardTime: number;
     setAutoHideHandler: () => void;
@@ -18,6 +20,8 @@ class Controller {
 
         this.autoHideTimer = 0;
         this.mobileSkipTimer = 0;
+        this.mobileSkipSeekTimer = 0;
+        this.mobileSkipTargetTime = null;
         this.mobileBackwardTime = 0;
         this.mobileForwardTime = 0;
         this.setAutoHideHandler = () => this.setAutoHide();
@@ -79,7 +83,7 @@ class Controller {
         // REW 10s
         this.player.template.mobileBackwardButton.addEventListener('click', () => {
             this.mobileBackwardTime += 10;
-            this.player.seek(this.player.video.currentTime - 10);
+            this.scheduleMobileSeek(-10);
             if (this.player.options.lang.includes('ja')) {
                 this.player.notice(`${this.mobileBackwardTime.toFixed(0)}秒早戻し`);
             } else {
@@ -90,6 +94,7 @@ class Controller {
             window.clearTimeout(this.mobileSkipTimer);
             this.mobileSkipTimer = window.setTimeout(() => {
                 this.mobileBackwardTime = 0;
+                this.mobileForwardTime = 0;
             }, 1000);
             this.setAutoHide();
         });
@@ -97,7 +102,7 @@ class Controller {
         // FF 10s
         this.player.template.mobileForwardButton.addEventListener('click', () => {
             this.mobileForwardTime += 10;
-            this.player.seek(this.player.video.currentTime + 10);
+            this.scheduleMobileSeek(10);
             if (this.player.options.lang.includes('ja')) {
                 this.player.notice(`${this.mobileForwardTime.toFixed(0)}秒早送り`);
             } else {
@@ -107,10 +112,47 @@ class Controller {
             // if the FF button is not pressed within 1 second, the count will be reset automatically
             window.clearTimeout(this.mobileSkipTimer);
             this.mobileSkipTimer = window.setTimeout(() => {
+                this.mobileBackwardTime = 0;
                 this.mobileForwardTime = 0;
             }, 1000);
             this.setAutoHide();
         });
+
+        // TLV seek 完了後に実時間が論理目標へ追いついたら、次の操作は通常の現在位置を起点に戻す。
+        // MediaSource 再構築中は currentTime が一時的に 0 になるため、その間は論理目標を保持し続ける。
+        this.player.on('timeupdate', () => {
+            if (this.mobileSkipTargetTime !== null &&
+                Math.abs(this.player.video.currentTime - this.mobileSkipTargetTime) < 1) {
+                this.mobileSkipTargetTime = null;
+            }
+        });
+    }
+
+    private scheduleMobileSeek(offsetSeconds: number): void {
+        // TLV は seek ごとに MediaSource を再構築し、その途中で video.currentTime が 0 に戻る。
+        // 連打時は一時的な currentTime ではなく直前の論理目標を起点にして、相対移動を正しく累積する。
+        const baseTime = this.mobileSkipTargetTime ?? this.player.video.currentTime;
+        const duration = utils.getVideoDuration(this.player.video, this.player.template);
+        let targetTime = Math.max(baseTime + offsetSeconds, 0);
+        if (duration) {
+            targetTime = Math.min(targetTime, duration);
+        }
+        this.mobileSkipTargetTime = targetTime;
+
+        // 通常動画は currentTime が同期的に更新されるため従来通り即時 seek する。
+        // TLV だけは短い連打を一つの要求に畳み、WASM・Range・MSE の無駄な再構築を避ける。
+        window.clearTimeout(this.mobileSkipSeekTimer);
+        if (this.player.type === 'tlv') {
+            this.mobileSkipSeekTimer = window.setTimeout(() => {
+                if (this.mobileSkipTargetTime !== null) {
+                    // 連打回数の通知はボタン側ですでに表示済みなので、遅延実行時の単発通知は重ねない。
+                    this.player.seek(this.mobileSkipTargetTime, true);
+                }
+            }, 300);
+        } else {
+            this.player.seek(targetTime);
+            this.mobileSkipTargetTime = null;
+        }
     }
 
     initHighlights(): void {
@@ -470,6 +512,8 @@ class Controller {
             this.player.container.removeEventListener('touchmove', this.setAutoHideHandler);
         }
         window.clearTimeout(this.autoHideTimer);
+        window.clearTimeout(this.mobileSkipTimer);
+        window.clearTimeout(this.mobileSkipSeekTimer);
     }
 }
 

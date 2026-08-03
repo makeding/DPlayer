@@ -5,12 +5,15 @@ declare class Controller {
     disableAutoHide: boolean;
     autoHideTimer: number;
     mobileSkipTimer: number;
+    mobileSkipSeekTimer: number;
+    mobileSkipTargetTime: number | null;
     mobileBackwardTime: number;
     mobileForwardTime: number;
     setAutoHideHandler: () => void;
     thumbnails: Thumbnails | null;
     constructor(player: DPlayer);
     initPlayButton(): void;
+    private scheduleMobileSeek;
     initHighlights(): void;
     initThumbnails(): void;
     initPlayedBar(): void;
