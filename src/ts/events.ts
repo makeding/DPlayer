@@ -65,6 +65,7 @@ class Events {
             'tlv_track_change',
             'tlv_caption_data',
             'tlv_broadcast_clock',
+            'tlv_layout_configuration',
             'tlv_event_info',
             'tlv_stream_event',
             'tlv_viewer_participation',

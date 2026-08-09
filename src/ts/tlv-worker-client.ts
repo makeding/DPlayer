@@ -41,6 +41,7 @@ type ObjectCache = {
     applications: Map<string, createTlvDemuxModule.ApplicationState>;
     resources: Map<string, CachedResource>;
     broadcastClock: createTlvDemuxModule.BroadcastClock | null;
+    layoutConfiguration: createTlvDemuxModule.LayoutConfiguration | null;
 };
 
 type WorkerMessage = {
@@ -93,6 +94,7 @@ class WorkerClient {
                 applications: new Map(),
                 resources: new Map(),
                 broadcastClock: null,
+                layoutConfiguration: null,
             });
         }
         await this.request('create', {objectId, objectType, options: options ?? {}});
@@ -168,6 +170,10 @@ class WorkerClient {
             cache.resources.clear();
         } else if (name === 'onBroadcastClock') {
             cache.broadcastClock = value as createTlvDemuxModule.BroadcastClock;
+        } else if (name === 'onLayoutConfiguration') {
+            cache.layoutConfiguration = value as createTlvDemuxModule.LayoutConfiguration;
+        } else if (name === 'onServiceStateReset') {
+            cache.layoutConfiguration = null;
         }
     }
 
@@ -254,6 +260,9 @@ export class WorkerDemuxer extends WorkerObject {
     }
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null {
         return this.currentCache()?.broadcastClock ?? null;
+    }
+    layoutConfiguration(): createTlvDemuxModule.LayoutConfiguration | null {
+        return this.currentCache()?.layoutConfiguration ?? null;
     }
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[] {
         const resources = [...(this.currentCache()?.resources.values() ?? [])];

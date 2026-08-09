@@ -31,6 +31,7 @@ type ObjectCache = {
     applications: Map<string, createTlvDemuxModule.ApplicationState>;
     resources: Map<string, CachedResource>;
     broadcastClock: createTlvDemuxModule.BroadcastClock | null;
+    layoutConfiguration: createTlvDemuxModule.LayoutConfiguration | null;
 };
 declare class WorkerClient {
     readonly ready: Promise<void>;
@@ -84,6 +85,7 @@ export declare class WorkerDemuxer extends WorkerObject {
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
+    layoutConfiguration(): createTlvDemuxModule.LayoutConfiguration | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     private currentCache;

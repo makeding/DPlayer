@@ -72,6 +72,7 @@ export type PlayerEvents =
     'tlv_track_change' |
     'tlv_caption_data' |
     'tlv_broadcast_clock' |
+    'tlv_layout_configuration' |
     'tlv_event_info' |
     'tlv_stream_event' |
     'tlv_viewer_participation' |
@@ -387,6 +388,8 @@ export interface TLVOptions {
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
+/** Layout configuration carried by an MMT LCT descriptor. */
+export type TLVLayoutConfiguration = createTlvDemuxModule.LayoutConfiguration;
 export interface TLVViewerParticipationNotification {
     contextId: number;
     sourcePacketId: number;
@@ -425,6 +428,8 @@ export interface TLVPlugin {
     applications(): createTlvDemuxModule.ApplicationState[];
     /** Latest media-to-broadcast-clock mapping, including one discovered before listeners attached. */
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
+    /** Latest LCT layout, including one discovered before listeners attached. */
+    layoutConfiguration(): TLVLayoutConfiguration | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     /** Suppress duplicate native rendering for components consumed by a data-broadcast page. */

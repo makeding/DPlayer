@@ -30,6 +30,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private generation;
     private sourceSize;
     private durationUs;
+    private currentLayoutConfiguration;
     private selectedTrackIds;
     private preferredVideoPacketId;
     private preferredAudioPacketId;
@@ -46,6 +47,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
+    layoutConfiguration(): createTlvDemuxModule.LayoutConfiguration | null;
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[];
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     setSubtitleSuppressedComponentTags(componentTags: number[]): void;

@@ -114,6 +114,8 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
             sendEvent(objectId, 'onTrack', track);
         },
         onBroadcastClock: event('onBroadcastClock'),
+        onLayoutConfiguration: event('onLayoutConfiguration'),
+        onServiceStateReset: event('onServiceStateReset'),
         onEventInfo: event('onEventInfo'),
         onStreamEvent: event('onStreamEvent'),
         onViewerParticipationNotification: event('onViewerParticipationNotification'),

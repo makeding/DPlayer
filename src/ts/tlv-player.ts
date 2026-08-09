@@ -142,6 +142,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private generation = 0;
     private sourceSize: bigint | null = null;
     private durationUs: bigint | null = null;
+    private currentLayoutConfiguration: createTlvDemuxModule.LayoutConfiguration | null = null;
     private selectedTrackIds = new Map<createTlvDemuxModule.TrackKind, bigint>();
     private preferredVideoPacketId: number | null;
     private preferredAudioPacketId: number | null = null;
@@ -217,6 +218,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null {
         return this.demuxer?.broadcastClock() ?? null;
+    }
+
+    layoutConfiguration(): createTlvDemuxModule.LayoutConfiguration | null {
+        return this.currentLayoutConfiguration;
     }
 
     applicationResources(contextId?: number): createTlvDemuxModule.ApplicationResourceMetadata[] {
@@ -514,6 +519,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
             onBroadcastClock: clock => {
                 if (active()) this.bridge.emit('tlv_broadcast_clock', clock);
+            },
+            onLayoutConfiguration: layout => {
+                if (!active()) return;
+                this.currentLayoutConfiguration = layout;
+                this.bridge.emit('tlv_layout_configuration', layout);
+            },
+            onServiceStateReset: () => {
+                if (!active()) return;
+                this.currentLayoutConfiguration = null;
+                this.bridge.emit('tlv_layout_configuration', null);
             },
             onEventInfo: event => {
                 if (active()) this.bridge.emit('tlv_event_info', event);
