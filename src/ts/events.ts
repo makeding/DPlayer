@@ -63,6 +63,7 @@ class Events {
             'tlv_error',
             'tlv_tracks',
             'tlv_track_change',
+            'tlv_layer_change',
             'tlv_caption_data',
             'tlv_broadcast_clock',
             'tlv_layout_configuration',

@@ -65,6 +65,7 @@ class Setting {
 
         // audio
         this.player.template.audio.addEventListener('click', () => {
+            if (this.player.container.classList.contains('dplayer-no-audio-switching')) return;
             this.player.template.settingBox.classList.add('dplayer-setting-box-audio');
         });
         this.player.template.audioHeader.addEventListener('click', () => {

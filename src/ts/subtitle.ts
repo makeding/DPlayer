@@ -55,8 +55,7 @@ class Subtitle {
             this.plugins.aribb24Caption.show();
         }
         if (this.options.type === 'aribb62' && this.plugins.aribb62) {
-            this.plugins.aribb62.overlay.classList.remove('dplayer-subtitle-hide');
-            this.plugins.aribb62.renderer.render();
+            this.plugins.aribb62.renderer.setTrackVisibility('caption', true);
         }
         if (this.options.type === 'aribb62' && this.plugins.tlv) {
             this.plugins.tlv.setSubtitleVisible(true);
@@ -73,7 +72,7 @@ class Subtitle {
             this.plugins.aribb24Caption.hide();
         }
         if (this.options.type === 'aribb62' && this.plugins.aribb62) {
-            this.plugins.aribb62.overlay.classList.add('dplayer-subtitle-hide');
+            this.plugins.aribb62.renderer.setTrackVisibility('caption', false);
         }
         if (this.options.type === 'aribb62' && this.plugins.tlv) {
             this.plugins.tlv.setSubtitleVisible(false);

@@ -104,6 +104,15 @@ type PlayerBridge = {
     notice: (message: string) => void;
 };
 
+type LayerSwitchRequest = {
+    demuxer: Demuxer;
+    generation: number;
+    videoTrack: DPlayerType.TLVTrackInfo;
+    audioTrack: DPlayerType.TLVTrackInfo;
+    resolve: () => void;
+    reject: (error: Error) => void;
+};
+
 function intersectRanges(
     left: Array<{start: number; end: number}>,
     right: Array<{start: number; end: number}>,
@@ -153,6 +162,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private pendingSeekTime: number | null = null;
     private audioSwitchPending = false;
     private audioSwitchError: Error | null = null;
+    private layerSwitchPending: LayerSwitchRequest | null = null;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -174,6 +184,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     selectVideoTrack(packetId: number): void {
+        if (this.layerSwitchPending) throw new Error('Another A/V layer switch is still in progress.');
         this.preferredVideoPacketId = packetId;
         const track = this.trackByPacket('video', packetId);
         if (!track || !this.demuxer) return;
@@ -192,6 +203,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             throw new Error('22.2-channel audio is not supported by browser MSE; use the 5.1 or stereo track.');
         }
         if (this.selectedTrackIds.get('audio') === track.trackId) return;
+        if (this.layerSwitchPending) throw new Error('Another A/V layer switch is still in progress.');
         if (this.audioSwitchPending) throw new Error('Another audio track switch is still in progress.');
         const demuxer = this.demuxer;
         if (!demuxer || !this.queueByType.has('audio')) {
@@ -220,16 +232,78 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         }
     }
 
+    async selectLayer(videoPacketId: number, audioPacketId: number): Promise<void> {
+        const videoTrack = this.trackByPacket('video', videoPacketId);
+        if (!videoTrack) {
+            throw new Error(`Video track packet_id=0x${videoPacketId.toString(16)} is not available.`);
+        }
+        const audioTrack = this.trackByPacket('audio', audioPacketId);
+        if (!audioTrack) {
+            throw new Error(`Audio track packet_id=0x${audioPacketId.toString(16)} is not available.`);
+        }
+        if (!this.isMseCompatibleAudioTrack(audioTrack)) {
+            throw new Error('22.2-channel audio is not supported by browser MSE; use the 5.1 or stereo track.');
+        }
+        if (this.selectedTrackIds.get('video') === videoTrack.trackId) {
+            await this.selectAudioTrack(audioPacketId);
+            return;
+        }
+        if (this.layerSwitchPending) throw new Error('Another A/V layer switch is still in progress.');
+        if (this.audioSwitchPending) throw new Error('Another audio track switch is still in progress.');
+        const demuxer = this.demuxer;
+        if (!demuxer || !this.queueByType.has('video') || !this.queueByType.has('audio')) {
+            throw new Error('A/V playback is not ready yet. Wait for playback to start and try again.');
+        }
+
+        let resolveCompletion!: () => void;
+        let rejectCompletion!: (error: Error) => void;
+        const completion = new Promise<void>((resolve, reject) => {
+            resolveCompletion = resolve;
+            rejectCompletion = reject;
+        });
+        const pending: LayerSwitchRequest = {
+            demuxer,
+            generation: this.generation,
+            videoTrack,
+            audioTrack,
+            resolve: resolveCompletion,
+            reject: rejectCompletion,
+        };
+        this.layerSwitchPending = pending;
+        try {
+            const earliestPresentationTimeUs = BigInt(
+                Math.round((this.bridge.video.currentTime + 0.1) * 1000000),
+            );
+            if (!await demuxer.switchLayer(
+                videoTrack.trackId, audioTrack.trackId, earliestPresentationTimeUs,
+            )) {
+                throw new Error('The A/V layer switch could not be started.');
+            }
+            await completion;
+        } catch (error) {
+            if (this.layerSwitchPending === pending) this.layerSwitchPending = null;
+            throw error;
+        }
+    }
+
     selectSubtitleTrack(packetId: number): void {
-        this.preferredSubtitlePacketId = packetId;
         const track = this.trackByPacket('subtitle', packetId);
         if (!track || !this.demuxer) return;
+        if (this.subtitleTrackKind(track) !== 'caption') {
+            throw new Error('Character superimpose is not a selectable caption track.');
+        }
+        this.preferredSubtitlePacketId = packetId;
+        const previousTrackId = this.selectedTrackIds.get('subtitle');
+        const previousTrack = this.tracks.find(candidate => candidate.trackId === previousTrackId);
         const demuxer = this.demuxer;
         this.selectedTrackIds.set('subtitle', track.trackId);
         void demuxer.selectTrack('subtitle', track.trackId).catch(error => {
             if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
         });
-        this.renderer?.reset();
+        if (previousTrack && previousTrack.trackId !== track.trackId &&
+            this.subtitleTrackKind(previousTrack) === 'caption') {
+            this.renderer?.clearTrack(previousTrack.packetId);
+        }
         this.bridge.emit('tlv_track_change', {kind: 'subtitle', track});
     }
 
@@ -262,22 +336,18 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             .map(Number)
             .filter(tag => Number.isInteger(tag) && tag >= 0 && tag <= 0xffff)
             .map(tag => tag & 0xff));
-        const selectedTrackId = this.selectedTrackIds.get('subtitle');
-        const selectedTrack = this.tracks.find(track => track.trackId === selectedTrackId);
-        if (selectedTrack && this.suppressedSubtitleComponentTags.has(selectedTrack.componentTag & 0xff)) {
-            this.renderer?.reset();
-        }
+        this.tracks.filter(track => track.kind === 'subtitle' &&
+            this.suppressedSubtitleComponentTags.has(track.componentTag & 0xff))
+            .forEach(track => this.renderer?.clearTrack(track.packetId));
     }
 
     setSubtitleVisible(visible: boolean): void {
-        if (!this.subtitleOverlay) return;
-        this.subtitleOverlay.style.display = visible ? '' : 'none';
-        if (!visible) this.subtitleOverlay.replaceChildren();
-        else this.renderer?.render();
+        this.renderer?.setTrackVisibility('caption', visible);
     }
 
     destroy(): void {
         if (this.destroyed) return;
+        this.rejectLayerSwitch(new DOMException('TLV playback was destroyed.', 'AbortError'));
         this.destroyed = true;
         this.generation += 1;
         this.abortController?.abort();
@@ -319,6 +389,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private async restart(startTimeSeconds: number): Promise<void> {
         if (!this.workerReady || this.destroyed) return;
+        this.rejectLayerSwitch(new DOMException('TLV playback was restarted.', 'AbortError'));
         const generation = ++this.generation;
         this.abortController?.abort();
         const controller = new AbortController();
@@ -382,7 +453,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // ただし MSE 出力全体を無効にすると audio init まで失われ、SourceBuffer を作れないままファイル末尾まで
         // Range 読み込みを続けてしまうため、init だけを保持して media segment は明示的に捨てる。
         let discardPendingSegments = startTimeSeconds > 0;
-        let selectedSubtitleTrack: createTlvDemuxModule.TrackInfo | null = null;
         let headVideoSeen = false;
         let seekRap: {seconds: number; restartOffset: bigint} | null = null;
         // 先頭解析中の RAP をシーク候補として扱うと、どの要求時刻でもファイル先頭付近から再生してしまう。
@@ -456,6 +526,18 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     callbackError = error;
                 }
             },
+            onMseVideoSplice: splice => {
+                if (!active()) return;
+                try {
+                    const queue = this.queueByType.get('video');
+                    if (!queue) throw new Error('Video SourceBuffer is not initialized.');
+                    queue.replaceFrom(Number(splice.presentationTimeUs) / 1000000);
+                } catch (error) {
+                    const normalized = error instanceof Error ? error : new Error(String(error));
+                    this.rejectLayerSwitch(normalized);
+                    callbackError = normalized;
+                }
+            },
             onMseAudioSplice: splice => {
                 if (!active()) return;
                 try {
@@ -464,8 +546,30 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     queue.replaceFrom(Number(splice.presentationTimeUs) / 1000000);
                 } catch (error) {
                     this.audioSwitchError = error instanceof Error ? error : new Error(String(error));
+                    this.rejectLayerSwitch(this.audioSwitchError);
                     callbackError = this.audioSwitchError;
                 }
+            },
+            onMseLayerSwitch: layer => {
+                if (!active()) return;
+                const pending = this.layerSwitchPending;
+                if (!pending || pending.demuxer !== demuxer || pending.generation !== generation ||
+                    pending.videoTrack.trackId !== layer.videoTrackId ||
+                    pending.audioTrack.trackId !== layer.audioTrackId) return;
+                this.layerSwitchPending = null;
+                this.preferredVideoPacketId = pending.videoTrack.packetId;
+                this.preferredAudioPacketId = pending.audioTrack.packetId;
+                this.selectedTrackIds.set('video', pending.videoTrack.trackId);
+                this.selectedTrackIds.set('audio', pending.audioTrack.trackId);
+                this.bridge.emit('tlv_track_change', {kind: 'video', track: pending.videoTrack});
+                this.bridge.emit('tlv_track_change', {kind: 'audio', track: pending.audioTrack});
+                this.bridge.emit('tlv_layer_change', {
+                    videoTrack: pending.videoTrack,
+                    audioTrack: pending.audioTrack,
+                    videoPresentationTimeUs: layer.videoPresentationTimeUs,
+                    audioPresentationTimeUs: layer.audioPresentationTimeUs,
+                } satisfies DPlayerType.TLVLayerChange);
+                pending.resolve();
             },
             onTrack: track => {
                 if (!active()) return;
@@ -482,19 +586,20 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                         track.packetId === this.preferredAudioPacketId)) {
                     this.selectedTrackIds.set('audio', track.trackId);
                 } else if (track.kind === 'subtitle' && track.codec === 'ttml') {
+                    const trackKind = this.subtitleTrackKind(track);
                     const currentSubtitleTrackId = this.selectedTrackIds.get('subtitle');
                     const currentSubtitleTrack = this.tracks.find(candidate => candidate.trackId === currentSubtitleTrackId);
-                    // MMT では文字スーパー (component_tag 0x38-0x3f) が番組字幕 (0x30-0x37) より先に
-                    // 通知されることがある。packet_id が明示されていない場合は、最初に見つかった TTML ではなく
-                    // 番組字幕を優先し、後から見つかった場合も自動で選び直す。
-                    const shouldSelectSubtitle = this.preferredSubtitlePacketId !== null ?
-                        track.packetId === this.preferredSubtitlePacketId :
-                        currentSubtitleTrack === undefined ||
-                        this.subtitleTrackPriority(track) > this.subtitleTrackPriority(currentSubtitleTrack);
+                    // 文字スーパーは常時 passthrough される独立平面で、字幕選択の対象にはしない。
+                    const shouldSelectSubtitle = trackKind === 'caption' &&
+                        (this.preferredSubtitlePacketId !== null ?
+                            track.packetId === this.preferredSubtitlePacketId :
+                            currentSubtitleTrack === undefined);
                     if (shouldSelectSubtitle) {
+                        if (currentSubtitleTrack && currentSubtitleTrack.trackId !== track.trackId &&
+                            this.subtitleTrackKind(currentSubtitleTrack) === 'caption') {
+                            this.renderer?.clearTrack(currentSubtitleTrack.packetId);
+                        }
                         this.selectedTrackIds.set('subtitle', track.trackId);
-                        selectedSubtitleTrack = track;
-                        this.renderer?.reset();
                     }
                 }
                 this.bridge.emit('tlv_tracks', [...this.tracks]);
@@ -521,7 +626,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                             trackId: unit.trackId,
                             packetId: subtitleTrack.packetId,
                             componentTag: unit.componentTag,
+                            subtitleType: subtitleTrack.subtitle!.type,
+                            subtitleOperationMode: subtitleTrack.subtitle!.operationMode,
                             subtitleTimingMode: unit.subtitleTimingMode,
+                            subtitleDisplayMode: subtitleTrack.subtitle!.displayMode,
                             mpuSequenceNumber: unit.mpuSequenceNumber,
                             ptsValue: unit.ptsValue,
                             ptsTimescale: unit.ptsTimescale,
@@ -539,16 +647,23 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                             discontinuity: unit.discontinuity,
                         } satisfies DPlayerType.TLVCaptionData);
                     }
-                    if (!discardPendingSegments && unit.trackId === this.selectedTrackIds.get('subtitle') &&
-                        selectedSubtitleTrack && this.renderer) {
+                    const shouldRenderSubtitle = subtitleTrack &&
+                        (unit.trackId === this.selectedTrackIds.get('subtitle') ||
+                            this.subtitleTrackKind(subtitleTrack) === 'superimpose');
+                    if (!discardPendingSegments && shouldRenderSubtitle && subtitleTrack && this.renderer) {
                         if (this.suppressedSubtitleComponentTags.has(unit.componentTag & 0xff)) return;
-                        if (unit.discontinuity) this.renderer.reset();
+                        if (unit.discontinuity) this.renderer.clearTrack(subtitleTrack.packetId);
                         this.renderer.push({
-                            packetId: selectedSubtitleTrack.packetId,
+                            packetId: subtitleTrack.packetId,
+                            trackKind: this.subtitleTrackKind(subtitleTrack),
+                            componentTag: unit.componentTag,
+                            subtitleType: subtitleTrack.subtitle!.type,
                             mpuSequenceNumber: unit.mpuSequenceNumber ?? undefined,
                             pts: timestampMilliseconds(unit.ptsValue, unit.ptsTimescale),
                             dts: timestampMilliseconds(unit.dtsValue, unit.dtsTimescale),
-                            subtitleTimingMode: selectedSubtitleTrack.subtitle?.timingMode,
+                            subtitleOperationMode: subtitleTrack.subtitle!.operationMode,
+                            subtitleTimingMode: subtitleTrack.subtitle!.timingMode,
+                            subtitleDisplayMode: subtitleTrack.subtitle!.displayMode,
                             subtitleReferenceStartMediaTime: timestampMilliseconds(
                                 unit.subtitleReferenceStartPtsValue,
                                 unit.subtitleReferenceStartPtsTimescale,
@@ -686,6 +801,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         }
         if (generation !== this.generation) return;
         await demuxer.flush();
+        if (this.layerSwitchPending?.demuxer === demuxer) {
+            this.rejectLayerSwitch(new Error('The input ended before the A/V layer switch completed.'));
+        }
         if (!this.bridge.live) await demuxer.finalizeIndex();
         if (this.mediaSource) {
             await finalizeMseMediaSource(this.mediaSource, this.queues, {
@@ -766,7 +884,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             inset: '0',
             pointerEvents: 'none',
             overflow: 'hidden',
-            display: this.bridge.subtitleVisible() ? '' : 'none',
         });
         this.bridge.mediaPlane.append(overlay);
         this.subtitleOverlay = overlay;
@@ -776,6 +893,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             overlayElement: overlay,
             isLive: this.bridge.live,
         });
+        this.renderer.setTrackVisibility('caption', this.bridge.subtitleVisible());
         this.renderer.render();
     }
 
@@ -823,12 +941,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         return track.audio?.channelLayout !== 14;
     }
 
-    private subtitleTrackPriority(track: DPlayerType.TLVTrackInfo): number {
-        // ARIB の component_tag 0x30-0x37 は字幕、0x38-0x3f は文字スーパーに割り当てられる。
-        // 字幕ボタンの既定対象には番組字幕を優先しつつ、それがないサービスでは文字スーパーも利用可能にする。
-        if (track.componentTag >= 0x30 && track.componentTag <= 0x37) return 2;
-        if (track.componentTag >= 0x38 && track.componentTag <= 0x3f) return 1;
-        return 0;
+    private subtitleTrackKind(track: DPlayerType.TLVTrackInfo): 'caption' | 'superimpose' {
+        if (track.subtitle?.type === 0) return 'caption';
+        if (track.subtitle?.type === 1) return 'superimpose';
+        throw new Error(`TTML packet_id=0x${track.packetId.toString(16)} has invalid subtitle.type.`);
     }
 
     private releaseMediaSource(): void {
@@ -848,7 +964,15 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private fail(error: unknown): void {
         const normalized = error instanceof Error ? error : new Error(String(error));
+        this.rejectLayerSwitch(normalized);
         this.bridge.emit('tlv_error', normalized);
         this.bridge.notice(normalized.message);
+    }
+
+    private rejectLayerSwitch(error: Error): void {
+        const pending = this.layerSwitchPending;
+        if (!pending) return;
+        this.layerSwitchPending = null;
+        pending.reject(error);
     }
 }

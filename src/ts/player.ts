@@ -440,6 +440,10 @@ class DPlayer {
         return this.plugins.tlv?.selectAudioTrack(packetId) ?? Promise.resolve();
     }
 
+    selectTLVLayer(videoPacketId: number, audioPacketId: number): Promise<void> {
+        return this.plugins.tlv?.selectLayer(videoPacketId, audioPacketId) ?? Promise.resolve();
+    }
+
     selectTLVSubtitleTrack(packetId: number): void {
         this.plugins.tlv?.selectSubtitleTrack(packetId);
     }

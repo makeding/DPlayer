@@ -70,6 +70,7 @@ export type PlayerEvents =
     'tlv_error' |
     'tlv_tracks' |
     'tlv_track_change' |
+    'tlv_layer_change' |
     'tlv_caption_data' |
     'tlv_broadcast_clock' |
     'tlv_layout_configuration' |
@@ -390,6 +391,12 @@ export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
 /** Layout configuration carried by an MMT LCT descriptor. */
 export type TLVLayoutConfiguration = createTlvDemuxModule.LayoutConfiguration;
+export interface TLVLayerChange {
+    videoTrack: TLVTrackInfo;
+    audioTrack: TLVTrackInfo;
+    videoPresentationTimeUs: bigint;
+    audioPresentationTimeUs: bigint;
+}
 export interface TLVViewerParticipationNotification {
     contextId: number;
     sourcePacketId: number;
@@ -406,7 +413,10 @@ export interface TLVCaptionData {
     trackId: bigint;
     packetId: number;
     componentTag: number;
+    subtitleType: 0 | 1;
+    subtitleOperationMode: number;
     subtitleTimingMode: number | null;
+    subtitleDisplayMode: number;
     mpuSequenceNumber: number | null;
     ptsValue: bigint;
     ptsTimescale: number;
@@ -423,6 +433,7 @@ export interface TLVPlugin {
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
+    selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
@@ -434,6 +445,7 @@ export interface TLVPlugin {
     applicationResource(contextId: number, path: string): createTlvDemuxModule.ApplicationResource | null;
     /** Suppress duplicate native rendering for components consumed by a data-broadcast page. */
     setSubtitleSuppressedComponentTags(componentTags: number[]): void;
+    /** Show or hide selectable captions without suppressing character superimpose. */
     setSubtitleVisible(visible: boolean): void;
     destroy(): void;
 }

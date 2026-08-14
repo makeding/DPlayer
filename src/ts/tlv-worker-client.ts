@@ -245,6 +245,10 @@ export class WorkerDemuxer extends WorkerObject {
     switchAudioTrack(trackId: bigint, earliestPresentationTimeUs: bigint): Promise<bigint | null> {
         return this.call('switchAudioTrack', [trackId, earliestPresentationTimeUs]);
     }
+    switchLayer(videoTrackId: bigint, audioTrackId: bigint,
+                earliestPresentationTimeUs: bigint): Promise<boolean> {
+        return this.call('switchLayer', [videoTrackId, audioTrackId, earliestPresentationTimeUs]);
+    }
     setMseOutputEnabled(enabled: boolean): Promise<void> { return this.call('setMseOutputEnabled', [enabled]); }
     setSubtitlePassthroughEnabled(enabled: boolean): Promise<void> {
         return this.call('setSubtitlePassthroughEnabled', [enabled]);

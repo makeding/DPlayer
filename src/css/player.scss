@@ -63,7 +63,9 @@
     &.dplayer-no-audio-switching {
         .dplayer-setting-box {
             .dplayer-setting-audio {
-                display: none;
+                cursor: default;
+                opacity: .45;
+                pointer-events: none;
             }
         }
     }

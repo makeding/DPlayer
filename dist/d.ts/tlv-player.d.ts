@@ -41,10 +41,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private pendingSeekTime;
     private audioSwitchPending;
     private audioSwitchError;
+    private layerSwitchPending;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
+    selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
@@ -68,10 +70,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private applyBackpressure;
     private bufferedAhead;
     private isMseCompatibleAudioTrack;
-    private subtitleTrackPriority;
+    private subtitleTrackKind;
     private releaseMediaSource;
     private trackByPacket;
     private fail;
+    private rejectLayerSwitch;
 }
 export {};
 //# sourceMappingURL=tlv-player.d.ts.map
