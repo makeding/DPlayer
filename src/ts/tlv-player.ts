@@ -561,6 +561,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 this.preferredAudioPacketId = pending.audioTrack.packetId;
                 this.selectedTrackIds.set('video', pending.videoTrack.trackId);
                 this.selectedTrackIds.set('audio', pending.audioTrack.trackId);
+                pending.resolve();
                 this.bridge.emit('tlv_track_change', {kind: 'video', track: pending.videoTrack});
                 this.bridge.emit('tlv_track_change', {kind: 'audio', track: pending.audioTrack});
                 this.bridge.emit('tlv_layer_change', {
@@ -569,7 +570,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     videoPresentationTimeUs: layer.videoPresentationTimeUs,
                     audioPresentationTimeUs: layer.audioPresentationTimeUs,
                 } satisfies DPlayerType.TLVLayerChange);
-                pending.resolve();
             },
             onTrack: track => {
                 if (!active()) return;
