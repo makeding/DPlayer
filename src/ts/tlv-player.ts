@@ -151,6 +151,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private destroyed = false;
     private playingStarted = false;
     private pendingSeekTime: number | null = null;
+    private audioSwitchPending = false;
+    private audioSwitchError: Error | null = null;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -185,14 +187,37 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     async selectAudioTrack(packetId: number): Promise<void> {
         const track = this.trackByPacket('audio', packetId);
-        if (!track) return;
+        if (!track) throw new Error(`Audio track packet_id=0x${packetId.toString(16)} is not available.`);
         if (this.isMseCompatibleAudioTrack(track) === false) {
-            this.bridge.notice('22.2-channel audio is not supported by browser MSE; use the 5.1 or stereo track.');
-            return;
+            throw new Error('22.2-channel audio is not supported by browser MSE; use the 5.1 or stereo track.');
         }
-        this.preferredAudioPacketId = packetId;
         if (this.selectedTrackIds.get('audio') === track.trackId) return;
-        await this.restart(this.bridge.live ? 0 : this.bridge.video.currentTime);
+        if (this.audioSwitchPending) throw new Error('Another audio track switch is still in progress.');
+        const demuxer = this.demuxer;
+        if (!demuxer || !this.queueByType.has('audio')) {
+            throw new Error('Audio playback is not ready yet. Wait for playback to start and try again.');
+        }
+
+        this.audioSwitchPending = true;
+        this.audioSwitchError = null;
+        const generation = this.generation;
+        try {
+            // 候補音声は Worker 側ですでに継続して保持されている。ここで加える 100ms は
+            // 読み込み待ちではなく、現在位置より少し先に splice 境界を置くための時間差だけ。
+            const earliestPresentationTimeUs = BigInt(Math.round((this.bridge.video.currentTime + 0.1) * 1000000));
+            const boundary = await demuxer.switchAudioTrack(track.trackId, earliestPresentationTimeUs);
+            if (this.audioSwitchError) throw this.audioSwitchError;
+            if (this.demuxer !== demuxer || this.generation !== generation || this.destroyed) return;
+            if (boundary === null) {
+                throw new Error('The selected audio track is not buffered at the current position yet. Wait briefly and try again.');
+            }
+            this.preferredAudioPacketId = packetId;
+            this.selectedTrackIds.set('audio', track.trackId);
+            this.bridge.emit('tlv_track_change', {kind: 'audio', track});
+        } finally {
+            this.audioSwitchPending = false;
+            this.audioSwitchError = null;
+        }
     }
 
     selectSubtitleTrack(packetId: number): void {
@@ -347,7 +372,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private async consumeSource(startTimeSeconds: number, generation: number, signal: AbortSignal): Promise<void> {
         const pendingInits = new Map<string, createTlvDemuxModule.MseTrackInit>();
-        const pendingSegments = new Map<string, Uint8Array[]>([['video', []], ['audio', []]]);
+        const pendingSegments = new Map<string, createTlvDemuxModule.MseMediaSegment[]>([
+            ['video', []],
+            ['audio', []],
+        ]);
         let callbackError: unknown = null;
         let incompleteInputTail = false;
         // VOD シークでは先頭をインデックス作成用に読む一方、その区間の media segment は再生してはいけない。
@@ -379,15 +407,26 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 this.queueByType.set(type, queue);
                 this.queues.push(queue);
                 queue.append(init.data);
-                for (const segment of pendingSegments.get(type) ?? []) queue.append(segment);
+                for (const segment of pendingSegments.get(type) ?? []) {
+                    queue.append(segment.data, {
+                        startTimeSeconds: Number(segment.startTimeUs) / 1000000,
+                        endTimeSeconds: Number(segment.endTimeUs) / 1000000,
+                    });
+                }
                 pendingSegments.set(type, []);
             }
         };
-        const appendSegment = (type: string, data: Uint8Array): void => {
+        const appendSegment = (segment: createTlvDemuxModule.MseMediaSegment): void => {
             if (discardPendingSegments) return;
-            const queue = this.queueByType.get(type);
-            if (queue) queue.append(data);
-            else pendingSegments.get(type)?.push(data);
+            const queue = this.queueByType.get(segment.type);
+            if (queue) {
+                queue.append(segment.data, {
+                    startTimeSeconds: Number(segment.startTimeUs) / 1000000,
+                    endTimeSeconds: Number(segment.endTimeUs) / 1000000,
+                });
+            } else {
+                pendingSegments.get(segment.type)?.push(segment);
+            }
         };
 
         const demuxer = this.worker!.createDemuxer({
@@ -400,8 +439,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 try {
                     const queue = this.queueByType.get(init.type);
                     if (queue) {
-                        if (queue.mime !== init.mime) throw new Error(`TLV codec changed: ${queue.mime} -> ${init.mime}`);
-                        queue.append(init.data);
+                        queue.appendInitialization(init.data, init.mime);
                     } else {
                         pendingInits.set(init.type, init);
                         installInits();
@@ -413,9 +451,20 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onMseSegment: segment => {
                 if (!active()) return;
                 try {
-                    appendSegment(segment.type, segment.data);
+                    appendSegment(segment);
                 } catch (error) {
                     callbackError = error;
+                }
+            },
+            onMseAudioSplice: splice => {
+                if (!active()) return;
+                try {
+                    const queue = this.queueByType.get('audio');
+                    if (!queue) throw new Error('Audio SourceBuffer is not initialized.');
+                    queue.replaceFrom(Number(splice.presentationTimeUs) / 1000000);
+                } catch (error) {
+                    this.audioSwitchError = error instanceof Error ? error : new Error(String(error));
+                    callbackError = this.audioSwitchError;
                 }
             },
             onTrack: track => {

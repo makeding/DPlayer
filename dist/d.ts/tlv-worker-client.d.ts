@@ -77,6 +77,7 @@ export declare class WorkerDemuxer extends WorkerObject {
     flush(): Promise<void>;
     reposition(offset: bigint, preserveTimeline: boolean): Promise<void>;
     selectTrack(kind: TrackKind, trackId: bigint | null): Promise<void>;
+    switchAudioTrack(trackId: bigint, earliestPresentationTimeUs: bigint): Promise<bigint | null>;
     setMseOutputEnabled(enabled: boolean): Promise<void>;
     setSubtitlePassthroughEnabled(enabled: boolean): Promise<void>;
     startIndex(growing: boolean): Promise<void>;

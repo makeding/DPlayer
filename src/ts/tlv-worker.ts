@@ -107,6 +107,7 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
     } = {
         mseMaxAudioChannels: record.selection.maxAudioChannels,
         onMseVideoStart: event('onMseVideoStart'),
+        onMseAudioSplice: event('onMseAudioSplice'),
         onMseInit(init) { sendEvent(objectId, 'onMseInit', init, [init.data.buffer]); },
         onMseSegment(segment) { sendEvent(objectId, 'onMseSegment', segment, [segment.data.buffer]); },
         onTrack(track) {
@@ -215,6 +216,9 @@ async function dispatch(message: Record<string, any>): Promise<void> {
         const value = record.type === 'demuxer' && message.method === 'push'
             ? pushBytes(record, message.args[0])
             : record.instance[message.method](...(message.args ?? []));
+        if (record.type === 'demuxer' && message.method === 'switchAudioTrack' && value !== null) {
+            record.selection.audioTrack = message.args[0];
+        }
         if (message.method === 'push' || message.method === 'flush') {
             drainApplications(record, message.method === 'flush');
         }
