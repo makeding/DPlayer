@@ -99,6 +99,7 @@ declare class DPlayer {
     selectTLVAudioTrack(packetId: number): Promise<void>;
     selectTLVLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectTLVSubtitleTrack(packetId: number): void;
+    private setAudioSwitchingAvailable;
     /**
      * Switch to a new video
      *

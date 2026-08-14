@@ -448,6 +448,11 @@ class DPlayer {
         this.plugins.tlv?.selectSubtitleTrack(packetId);
     }
 
+    private setAudioSwitchingAvailable(available: boolean): void {
+        this.container.classList.toggle('dplayer-no-audio-switching', !available);
+        this.template.audio.setAttribute('aria-disabled', String(!available));
+    }
+
     /**
      * Switch to a new video
      *
@@ -572,10 +577,7 @@ class DPlayer {
                     this.type = 'normal';
                 }
             }
-            if (!(this.type === 'mpegts' || this.type === 'tlv')) {
-                // audio switching is enabled only when using mpegts.js
-                this.container.classList.add('dplayer-no-audio-switching');
-            }
+            this.setAudioSwitchingAvailable(this.type === 'mpegts');
 
             switch (this.type) {
                 // https://github.com/video-dev/hls.js
@@ -607,12 +609,7 @@ class DPlayer {
 
                             // Listen for audio tracks updates
                             hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, () => {
-                                if (hls.audioTracks.length >= 2) {
-                                    // Remove no-audio-switching class if multiple audio tracks are available
-                                    this.container.classList.remove('dplayer-no-audio-switching');
-                                } else {
-                                    this.container.classList.add('dplayer-no-audio-switching');
-                                }
+                                this.setAudioSwitchingAvailable(hls.audioTracks.length >= 2);
                             });
 
                             // processing when destroy
@@ -860,7 +857,20 @@ class DPlayer {
                         subtitleOptions: this.options.pluginOptions.aribb62,
                         subtitleVisible: () => this.user.get('subtitle') !== 0 &&
                             !this.template.subtitle.classList.contains('dplayer-subtitle-hide'),
-                        emit: (name, detail) => this.events.trigger(name, detail),
+                        emit: (name, detail) => {
+                            if (name === 'tlv_tracks') {
+                                const choices = new Set<string>();
+                                for (const track of detail as DPlayerType.TLVTrackInfo[]) {
+                                    if (track.kind !== 'audio' || track.audio?.channelLayout === 14) continue;
+                                    if (track.assetGroups.length === 0) choices.add(`track:${track.trackId}`);
+                                    for (const group of track.assetGroups) {
+                                        choices.add(`${track.contextId}:${group.groupIdentification}`);
+                                    }
+                                }
+                                this.setAudioSwitchingAvailable(choices.size >= 2);
+                            }
+                            this.events.trigger(name, detail);
+                        },
                         notice: message => this.notice(`Error: ${message}`, undefined, undefined, '#FF6F6A'),
                     });
                     this.plugins.tlv = tlvPlayer;
