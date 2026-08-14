@@ -113,6 +113,35 @@ type LayerSwitchRequest = {
     reject: (error: Error) => void;
 };
 
+function selectionLevel(track: DPlayerType.TLVTrackInfo, groupIdentification: number | null = null): number | null {
+    const group = track.assetGroups.find(candidate =>
+        (groupIdentification === null || candidate.groupIdentification === groupIdentification));
+    if (group) return group.selectionLevel;
+    return track.kind === 'video' && groupIdentification === null && track.assetGroups.length === 0 ? 0 : null;
+}
+
+function sameVideoLayerGroup(left: DPlayerType.TLVTrackInfo, right: DPlayerType.TLVTrackInfo): boolean {
+    if (left.kind !== 'video' || right.kind !== 'video' || left.contextId !== right.contextId) return false;
+    if (!left.assetGroups.length || !right.assetGroups.length) return true;
+    return left.assetGroups.some(leftGroup => right.assetGroups.some(rightGroup =>
+        leftGroup.groupIdentification === rightGroup.groupIdentification));
+}
+
+function correspondingAudioTrack(
+    tracks: DPlayerType.TLVTrackInfo[],
+    current: DPlayerType.TLVTrackInfo,
+    targetLevel: number | null,
+): DPlayerType.TLVTrackInfo | null {
+    if (targetLevel === null) return null;
+    const groupIds = current.assetGroups.map(group => group.groupIdentification);
+    for (const groupId of groupIds) {
+        const track = tracks.find(candidate => candidate.kind === 'audio' && candidate.assetGroups.some(group =>
+            group.groupIdentification === groupId && group.selectionLevel === targetLevel));
+        if (track) return track;
+    }
+    return null;
+}
+
 function intersectRanges(
     left: Array<{start: number; end: number}>,
     right: Array<{start: number; end: number}>,
@@ -163,6 +192,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchPending = false;
     private audioSwitchError: Error | null = null;
     private layerSwitchPending: LayerSwitchRequest | null = null;
+    private automaticLayerPairSignature: string | null = null;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -603,6 +633,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     }
                 }
                 this.bridge.emit('tlv_tracks', [...this.tracks]);
+                this.configureAutomaticLayerSwitch();
             },
             onAccessUnitView: unit => {
                 if (!active()) return;
@@ -939,6 +970,41 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // ARIB の 22.2ch トラック (channel_configuration=14) は fMP4 上 13 channels の AAC になるが、
         // 現行ブラウザの MSE audio decoder は受け付けない。8K 放送に併送される 5.1ch/2ch を使う。
         return track.audio?.channelLayout !== 14;
+    }
+
+    private configureAutomaticLayerSwitch(): void {
+        const demuxer = this.demuxer;
+        if (!demuxer) return;
+        if (this.preferredVideoPacketId !== null) {
+            if (this.automaticLayerPairSignature !== 'disabled') {
+                this.automaticLayerPairSignature = 'disabled';
+                void demuxer.clearAutomaticLayerSwitch();
+            }
+            return;
+        }
+        const selectedVideo = this.tracks.find(track =>
+            track.kind === 'video' && track.trackId === this.selectedTrackIds.get('video'));
+        const selectedAudio = this.tracks.find(track =>
+            track.kind === 'audio' && track.trackId === this.selectedTrackIds.get('audio'));
+        if (!selectedVideo || !selectedAudio) return;
+        const videos = this.tracks
+            .filter(track => sameVideoLayerGroup(selectedVideo, track))
+            .sort((left, right) =>
+                (selectionLevel(left) ?? 0xff) - (selectionLevel(right) ?? 0xff));
+        const preferredVideo = videos[0];
+        const fallbackVideo = videos.find(track =>
+            selectionLevel(track) !== null && selectionLevel(track)! > (selectionLevel(preferredVideo) ?? 0xff));
+        if (!preferredVideo || !fallbackVideo) return;
+        const preferredAudio = correspondingAudioTrack(this.tracks, selectedAudio, selectionLevel(preferredVideo));
+        const fallbackAudio = correspondingAudioTrack(this.tracks, selectedAudio, selectionLevel(fallbackVideo));
+        if (!preferredAudio || !fallbackAudio) return;
+        const signature = [preferredVideo.trackId, preferredAudio.trackId, fallbackVideo.trackId, fallbackAudio.trackId].join(':');
+        if (signature === this.automaticLayerPairSignature) return;
+        this.automaticLayerPairSignature = signature;
+        void demuxer.configureAutomaticLayerSwitch(
+            preferredVideo.trackId, preferredAudio.trackId,
+            fallbackVideo.trackId, fallbackAudio.trackId,
+        );
     }
 
     private subtitleTrackKind(track: DPlayerType.TLVTrackInfo): 'caption' | 'superimpose' {

@@ -42,6 +42,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchPending;
     private audioSwitchError;
     private layerSwitchPending;
+    private automaticLayerPairSignature;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
@@ -70,6 +71,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private applyBackpressure;
     private bufferedAhead;
     private isMseCompatibleAudioTrack;
+    private configureAutomaticLayerSwitch;
     private subtitleTrackKind;
     private releaseMediaSource;
     private trackByPacket;

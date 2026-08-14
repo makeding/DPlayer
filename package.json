@@ -40,10 +40,10 @@
     },
     "dependencies": {
         "aribb24.js": "~1.11.5",
-        "aribb62.js": "^0.1.11",
+        "aribb62.js": "^0.2.0",
         "axios": "^1.7.2",
         "balloon-css": "^1.2.0",
-        "tlvdemux": "^0.1.11"
+        "tlvdemux": "^0.2.0"
     },
     "devDependencies": {
         "@babel/core": "^7.24.9",
