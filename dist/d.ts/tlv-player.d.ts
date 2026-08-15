@@ -43,12 +43,14 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchError;
     private layerSwitchPending;
     private automaticLayerPairSignature;
+    private toneMappingMode;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
+    setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;

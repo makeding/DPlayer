@@ -128,6 +128,16 @@
             <span class="dplayer-label-value">{{ tran('Normal') }}</span>
             <div class="dplayer-toggle">{{@ icons.right }}</div>
         </div>
+        {{ if options.video.type === 'tlv' }}
+        <div class="dplayer-setting-item dplayer-setting-tone-mapping">
+            <span class="dplayer-label">{{ tran('HDR to SDR') }}</span>
+            <div class="dplayer-tone-mapping-modes" role="group" aria-label="{{ tran('HDR to SDR') }}" style="--theme-color:{{ options.theme }}">
+                <button type="button" data-tone-mapping-mode="force">On</button>
+                <button type="button" class="dplayer-tone-mapping-current" data-tone-mapping-mode="auto">Auto</button>
+                <button type="button" data-tone-mapping-mode="off">Off</button>
+            </div>
+        </div>
+        {{ /if }}
         <div class="dplayer-setting-item dplayer-setting-loop">
             <span class="dplayer-label">{{ tran('Loop') }}</span>
             <div class="dplayer-toggle">

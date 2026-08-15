@@ -83,6 +83,7 @@ export declare class WorkerDemuxer extends WorkerObject {
     clearAutomaticLayerSwitch(): Promise<void>;
     setMseOutputEnabled(enabled: boolean): Promise<void>;
     setSubtitlePassthroughEnabled(enabled: boolean): Promise<void>;
+    setMseToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): Promise<void>;
     startIndex(growing: boolean): Promise<void>;
     finalizeIndex(): Promise<boolean>;
     estimateOffset(target: bigint, sourceSize: bigint): Promise<bigint | null>;

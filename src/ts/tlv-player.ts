@@ -193,6 +193,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchError: Error | null = null;
     private layerSwitchPending: LayerSwitchRequest | null = null;
     private automaticLayerPairSignature: string | null = null;
+    private toneMappingMode: createTlvDemuxModule.MseToneMappingMode = 'auto';
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -335,6 +336,15 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             this.renderer?.clearTrack(previousTrack.packetId);
         }
         this.bridge.emit('tlv_track_change', {kind: 'subtitle', track});
+    }
+
+    setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void {
+        this.toneMappingMode = mode;
+        const demuxer = this.demuxer;
+        if (!demuxer) return;
+        void demuxer.setMseToneMappingMode(mode).catch(error => {
+            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
+        });
     }
 
     applicationEntry(contextId: number): string | null {
@@ -759,6 +769,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.demuxer = demuxer;
         await demuxer.initialized();
+        await demuxer.setMseToneMappingMode(this.toneMappingMode);
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
         await demuxer.setSubtitlePassthroughEnabled(true);

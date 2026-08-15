@@ -448,6 +448,10 @@ class DPlayer {
         this.plugins.tlv?.selectSubtitleTrack(packetId);
     }
 
+    setTLVToneMappingMode(mode: DPlayerType.ToneMappingMode): void {
+        this.plugins.tlv?.setToneMappingMode(mode);
+    }
+
     private setAudioSwitchingAvailable(available: boolean): void {
         this.container.classList.toggle('dplayer-no-audio-switching', !available);
         this.template.audio.setAttribute('aria-disabled', String(!available));

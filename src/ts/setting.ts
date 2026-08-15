@@ -10,6 +10,7 @@ class Setting {
     showDanmaku: boolean;
     unlimitDanmaku: boolean;
     currentAudio: 'primary' | 'secondary' = 'primary';
+    toneMappingMode: DPlayerType.ToneMappingMode = 'auto';
     resizeObserver: ResizeObserver;
 
     constructor(player: DPlayer) {
@@ -123,6 +124,17 @@ class Setting {
             });
         }
 
+        if (this.player.type === 'tlv') {
+            const savedToneMappingMode = this.player.user.get('toneMappingMode');
+            this.toneMappingMode = savedToneMappingMode === 2 ? 'force' : savedToneMappingMode === 0 ? 'off' : 'auto';
+            this.updateToneMappingMode();
+            this.player.template.toneMappingModes.forEach(button => button.addEventListener('click', () => {
+                this.toneMappingMode = button.dataset.toneMappingMode as DPlayerType.ToneMappingMode;
+                this.player.user.set('toneMappingMode', this.toneMappingMode === 'force' ? 2 : this.toneMappingMode === 'off' ? 0 : 1);
+                this.updateToneMappingMode();
+            }));
+        }
+
         // loop
         this.loop = this.player.user.get('loop') === 1;
         this.player.template.loopToggle.checked = this.loop;
@@ -225,6 +237,13 @@ class Setting {
                 this.player.template.danmakuOpacityBox.classList.add('dplayer-setting-danmaku-active');
             });
         }
+    }
+
+    private updateToneMappingMode(): void {
+        this.player.setTLVToneMappingMode(this.toneMappingMode);
+        this.player.template.toneMappingModes.forEach(button => {
+            button.classList.toggle('dplayer-tone-mapping-current', button.dataset.toneMappingMode === this.toneMappingMode);
+        });
     }
 
     hide(): void {

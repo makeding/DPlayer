@@ -377,6 +377,8 @@ export interface TLVSourceOptions {
     fileSize?: number;
 }
 
+export type ToneMappingMode = createTlvDemuxModule.MseToneMappingMode;
+
 export interface TLVOptions {
     /** Additional fetch options. `signal` and Range headers remain player-owned. */
     fetch?: Omit<RequestInit, 'signal' | 'headers'> & {headers?: HeadersInit};
@@ -435,6 +437,7 @@ export interface TLVPlugin {
     selectAudioTrack(packetId: number): Promise<void>;
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
+    setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
     /** Latest media-to-broadcast-clock mapping, including one discovered before listeners attached. */

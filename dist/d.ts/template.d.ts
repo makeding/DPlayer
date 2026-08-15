@@ -51,6 +51,7 @@ declare class Template {
     audioValue: HTMLElement;
     audioHeader: HTMLElement;
     audioItem: NodeListOf<HTMLElement>;
+    toneMappingModes: NodeListOf<HTMLButtonElement>;
     danmakuOpacityBar: HTMLElement;
     danmakuOpacityBarWrap: HTMLElement;
     danmakuOpacityBarWrapWrap: HTMLElement;

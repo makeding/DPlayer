@@ -15,6 +15,7 @@ class User {
             subtitle: 'dplayer-subtitle-show',
             speed: 'dplayer-speed',
             loop: 'dplayer-loop',
+            toneMappingMode: 'dplayer-tone-mapping-mode',
         };
         this.default = {
             opacity: 1.0,
@@ -24,6 +25,7 @@ class User {
             subtitle: 1,
             speed: 1.0,
             loop: player.options.loop ? 1 : 0,
+            toneMappingMode: 1,
         };
         this.data = {};
 
@@ -37,11 +39,11 @@ class User {
         }
     }
 
-    get(key: 'opacity' | 'volume' | 'unlimited' | 'danmaku' | 'subtitle' | 'speed' | 'loop'): number {
+    get(key: 'opacity' | 'volume' | 'unlimited' | 'danmaku' | 'subtitle' | 'speed' | 'loop' | 'toneMappingMode'): number {
         return this.data[key];
     }
 
-    set(key: 'opacity' | 'volume' | 'unlimited' | 'danmaku' | 'subtitle' | 'speed' | 'loop', value: number): void {
+    set(key: 'opacity' | 'volume' | 'unlimited' | 'danmaku' | 'subtitle' | 'speed' | 'loop' | 'toneMappingMode', value: number): void {
         this.data[key] = value;
         utils.storage.set(this.storageName[key], value);
     }

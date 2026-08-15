@@ -739,6 +739,28 @@
             }
         }
     }
+    .dplayer-tone-mapping-modes {
+        display: flex;
+        margin-left: auto;
+        button {
+            min-width: 34px;
+            height: 22px;
+            padding: 0 5px;
+            border: 1px solid rgba(255, 255, 255, .35);
+            background: transparent;
+            color: #e0e0e0;
+            font-size: 11px;
+            cursor: pointer;
+            &:first-child { border-radius: 3px 0 0 3px; }
+            &:last-child { border-radius: 0 3px 3px 0; }
+            & + button { border-left: 0; }
+            &.dplayer-tone-mapping-current {
+                background: var(--theme-color);
+                border-color: var(--theme-color);
+                color: #fff;
+            }
+        }
+    }
 }
 
 .dplayer-comment-setting-box {
