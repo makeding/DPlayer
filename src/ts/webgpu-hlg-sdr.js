@@ -156,8 +156,6 @@ export class WebGpuHlgSdrRenderer {
     if (!this.enabled || !this.device || !this.context || !this.pipeline || !this.lutTexture ||
         this.video.readyState < 2 || this.video.videoWidth === 0 || this.video.videoHeight === 0) return;
     this.resize();
-    const width = this.canvas.width;
-    const height = this.canvas.height;
     const videoFrame = this.device.importExternalTexture({source: this.video});
     const bindGroup = this.device.createBindGroup({
       layout: this.pipeline.getBindGroupLayout(0),
@@ -176,10 +174,8 @@ export class WebGpuHlgSdrRenderer {
         storeOp: 'store',
       }],
     });
-    const rightHalfStart = Math.floor(width / 2);
     pass.setPipeline(this.pipeline);
     pass.setBindGroup(0, bindGroup);
-    pass.setScissorRect(rightHalfStart, 0, width - rightHalfStart, height);
     pass.draw(3);
     pass.end();
     this.device.queue.submit([encoder.finish()]);

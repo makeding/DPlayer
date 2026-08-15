@@ -14,7 +14,6 @@ uniform sampler2D uToneMap;
 varying vec2 vTextureCoordinate;
 
 void main() {
-  if (vTextureCoordinate.x < 0.5) discard;
   vec4 sample = texture2D(uVideo, vTextureCoordinate);
   float toneMapR = texture2D(uToneMap, vec2(sample.r, 0.5)).r;
   float toneMapG = texture2D(uToneMap, vec2(sample.g, 0.5)).r;
