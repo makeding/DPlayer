@@ -344,12 +344,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void {
         this.toneMappingMode = mode;
+        const effectiveMode = this.effectiveToneMappingMode();
         const demuxer = this.demuxer;
         if (!demuxer) {
             this.updateHlgSdrRenderer();
             return;
         }
-        void demuxer.setMseToneMappingMode(mode).then(() => {
+        void demuxer.setMseToneMappingMode(effectiveMode).then(() => {
             if (this.demuxer === demuxer && !this.destroyed) this.updateHlgSdrRenderer();
         }).catch(error => {
             if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
@@ -787,7 +788,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.demuxer = demuxer;
         await demuxer.initialized();
         this.hlgSdrRenderer.setLut(await demuxer.hlgSdrToneMappingLut());
-        await demuxer.setMseToneMappingMode(this.toneMappingMode);
+        await demuxer.setMseToneMappingMode(this.effectiveToneMappingMode());
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
         await demuxer.setSubtitlePassthroughEnabled(true);
@@ -959,9 +960,17 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private updateHlgSdrRenderer(): void {
         const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
-        const enabled = sourceIsHlg && this.toneMappingMode !== 'off' &&
-            (this.toneMappingMode === 'force' || this.videoProperties?.sdrInHlg === true);
+        const effectiveMode = this.effectiveToneMappingMode();
+        const enabled = sourceIsHlg && effectiveMode !== 'off' &&
+            (effectiveMode === 'force' || this.videoProperties?.sdrInHlg === true);
         this.hlgSdrRenderer.setEnabled(enabled);
+    }
+
+    private effectiveToneMappingMode(): createTlvDemuxModule.MseToneMappingMode {
+        if (this.toneMappingMode !== 'auto') return this.toneMappingMode;
+        const hdrOutput = matchMedia('(video-dynamic-range: high)').matches ||
+            matchMedia('(dynamic-range: high)').matches;
+        return hdrOutput ? 'off' : 'force';
     }
 
     private maybeStartPlayback(): void {

@@ -72,6 +72,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private fetch;
     private createSubtitleRenderer;
     private updateHlgSdrRenderer;
+    private effectiveToneMappingMode;
     private maybeStartPlayback;
     private applyBackpressure;
     private bufferedAhead;
