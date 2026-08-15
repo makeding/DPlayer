@@ -270,24 +270,70 @@ export default class HlgSdrRenderer {
     private readonly webGlCanvas = document.createElement('canvas');
     private readonly webGpu: WebGpuHlgSdrRenderer;
     private readonly webGl: WebGlHlgSdrRenderer;
+    private readonly layoutObserver: MutationObserver;
+    private readonly resizeObserver: ResizeObserver;
     private enabled = false;
     constructor(video: HTMLVideoElement, mediaPlane: HTMLElement) {
         for (const canvas of [this.webGpuCanvas, this.webGlCanvas]) {
             canvas.className = 'dplayer-hlg-sdr-canvas';
             canvas.setAttribute('aria-hidden', 'true');
-            Object.assign(canvas.style, {position: 'absolute', zIndex: '0', inset: '0', width: '100%', height: '100%', pointerEvents: 'none'});
+            Object.assign(canvas.style, {position: 'absolute', zIndex: '2', inset: '0', width: '100%', height: '100%', pointerEvents: 'none'});
             mediaPlane.append(canvas);
         }
         this.webGpu = new WebGpuHlgSdrRenderer(video, this.webGpuCanvas);
         this.webGl = new WebGlHlgSdrRenderer(video, this.webGlCanvas);
+        this.layoutObserver = new MutationObserver(() => this.syncLayout(video));
+        this.layoutObserver.observe(video, {attributes: true, attributeFilter: ['style']});
+        this.resizeObserver = new ResizeObserver(() => this.syncLayout(video));
+        this.resizeObserver.observe(video);
+        this.syncLayout(video);
     }
-    setLut(lut: Uint8Array): void { this.webGpu.setLut(lut); this.webGl.setLut(lut); }
+    setLut(lut: Uint8Array): void {
+        this.webGpu.setLut(lut);
+        this.webGl.setLut(lut);
+        if (this.enabled) this.setEnabled(true);
+    }
     setEnabled(enabled: boolean): void {
         this.enabled = enabled;
         if (!enabled) { this.webGl.setEnabled(false); void this.webGpu.setEnabled(false); return; }
-        void this.webGpu.setEnabled(true).then(active => {
-            if (this.enabled) this.webGl.setEnabled(!active);
-        });
+        // WebGPU external textures may be available but reject an MSE-backed
+        // video only while drawing. Prefer the demo's synchronous WebGL path
+        // so a transparent WebGPU canvas cannot mask the working fallback.
+        if (this.webGl.setEnabled(true)) {
+            void this.webGpu.setEnabled(false);
+            return;
+        }
+        void this.webGpu.setEnabled(true);
     }
-    destroy(): void { this.webGpu.destroy(); this.webGl.destroy(); }
+    destroy(): void {
+        this.layoutObserver.disconnect();
+        this.resizeObserver.disconnect();
+        this.webGpu.destroy();
+        this.webGl.destroy();
+    }
+
+    private syncLayout(video: HTMLVideoElement): void {
+        const externalPlane = video.style.position === 'absolute' && video.style.width !== '' && video.style.height !== '';
+        for (const canvas of [this.webGpuCanvas, this.webGlCanvas]) {
+            if (externalPlane) {
+                Object.assign(canvas.style, {
+                    inset: 'auto',
+                    left: video.style.left,
+                    top: video.style.top,
+                    width: video.style.width,
+                    height: video.style.height,
+                    zIndex: video.style.zIndex || '1',
+                });
+            } else {
+                Object.assign(canvas.style, {
+                    inset: '0',
+                    left: 'auto',
+                    top: 'auto',
+                    width: '100%',
+                    height: '100%',
+                    zIndex: '2',
+                });
+            }
+        }
+    }
 }

@@ -242,7 +242,7 @@ class Setting {
 
     private updateToneMappingMode(): void {
         this.player.setTLVToneMappingMode(this.toneMappingMode);
-        const label = this.toneMappingMode === 'force' ? 'On' : this.toneMappingMode === 'off' ? 'Off' : 'Auto';
+        const label = this.toneMappingMode === 'force' ? 'ON' : this.toneMappingMode === 'off' ? 'OFF' : 'AUTO';
         this.player.template.toneMappingValue.textContent = label;
         this.player.template.toneMappingButton.classList.toggle('dplayer-tone-mapping-active', this.toneMappingMode !== 'off');
         this.player.template.toneMappingButton.setAttribute('aria-label', `HDR to SDR: ${label}`);

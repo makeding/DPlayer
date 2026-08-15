@@ -937,7 +937,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         overlay.className = 'dplayer-aribb62-subtitle';
         Object.assign(overlay.style, {
             position: 'absolute',
-            zIndex: '1',
             inset: '0',
             pointerEvents: 'none',
             overflow: 'hidden',
@@ -956,8 +955,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private updateHlgSdrRenderer(): void {
         const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
-        const enabled = sourceIsHlg && this.toneMappingMode !== 'off' &&
-            (this.toneMappingMode === 'force' || this.videoProperties?.sdrInHlg === true);
+        const enabled = this.toneMappingMode === 'force' ||
+            (sourceIsHlg && this.toneMappingMode === 'auto' && this.videoProperties?.sdrInHlg === true);
         this.hlgSdrRenderer.setEnabled(enabled);
     }
 
