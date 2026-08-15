@@ -272,7 +272,10 @@ export class WorkerDemuxer extends WorkerObject {
     setMseToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): Promise<void> {
         return this.call('setMseToneMappingMode', [mode]);
     }
-    hlgSdrToneMappingLut(): Promise<Uint8Array> { return this.call('hlgSdrToneMappingLut'); }
+    hlgSdrColorLut(): Promise<createTlvDemuxModule.HlgSdrColorLut> { return this.call('hlgSdrColorLut'); }
+    hlgSdrPrototypeColorLut(): Promise<createTlvDemuxModule.HlgSdrColorLut> {
+        return this.call('hlgSdrPrototypeColorLut');
+    }
     startIndex(growing: boolean): Promise<void> { return this.call('startIndex', [growing]); }
     finalizeIndex(): Promise<boolean> { return this.call('finalizeIndex'); }
     estimateOffset(target: bigint, sourceSize: bigint): Promise<bigint | null> {

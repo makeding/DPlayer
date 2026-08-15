@@ -43,7 +43,7 @@
         "aribb62.js": "^0.2.0",
         "axios": "^1.7.2",
         "balloon-css": "^1.2.0",
-        "tlvdemux": "^0.2.2-rc3"
+        "tlvdemux": "^0.2.2-rc4"
     },
     "devDependencies": {
         "@babel/core": "^7.24.9",

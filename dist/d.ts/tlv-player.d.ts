@@ -45,6 +45,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private layerSwitchPending;
     private automaticLayerPairSignature;
     private toneMappingMode;
+    private hlgSdrColorLut;
+    private hlgSdrPrototypeColorLut;
     private videoProperties;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;

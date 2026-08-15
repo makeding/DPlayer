@@ -3,7 +3,7 @@ import type createTlvDemuxModule from 'tlvdemux';
 import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue';
 
 import type * as DPlayerType from './types';
-import HlgSdrRenderer from './hlg-sdr-demo-renderer';
+import HlgSdrRenderer from './hlg-sdr-player-renderer';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
 const MiB = 1024n * 1024n;
@@ -196,6 +196,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private layerSwitchPending: LayerSwitchRequest | null = null;
     private automaticLayerPairSignature: string | null = null;
     private toneMappingMode: createTlvDemuxModule.MseToneMappingMode = 'auto';
+    private hlgSdrColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
+    private hlgSdrPrototypeColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
     private videoProperties: createTlvDemuxModule.MseVideoProperties | null = null;
 
     constructor(bridge: PlayerBridge) {
@@ -787,8 +789,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.demuxer = demuxer;
         await demuxer.initialized();
-        this.hlgSdrRenderer.setLut(await demuxer.hlgSdrToneMappingLut());
+        [this.hlgSdrColorLut, this.hlgSdrPrototypeColorLut] = await Promise.all([
+            demuxer.hlgSdrColorLut(), demuxer.hlgSdrPrototypeColorLut(),
+        ]);
         await demuxer.setMseToneMappingMode(this.effectiveToneMappingMode());
+        this.updateHlgSdrRenderer();
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
         await demuxer.setSubtitlePassthroughEnabled(true);
@@ -961,8 +966,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private updateHlgSdrRenderer(): void {
         const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
         const effectiveMode = this.effectiveToneMappingMode();
+        const lut = effectiveMode === 'prototype' ? this.hlgSdrPrototypeColorLut : this.hlgSdrColorLut;
+        if (lut) this.hlgSdrRenderer.setColorLut(lut);
         const enabled = sourceIsHlg && effectiveMode !== 'off' &&
-            (effectiveMode === 'force' || this.videoProperties?.sdrInHlg === true);
+            (effectiveMode === 'force' || effectiveMode === 'prototype' ||
+             this.videoProperties?.sdrInHlg === true);
         this.hlgSdrRenderer.setEnabled(enabled);
     }
 
@@ -970,7 +978,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (this.toneMappingMode !== 'auto') return this.toneMappingMode;
         const hdrOutput = matchMedia('(video-dynamic-range: high)').matches ||
             matchMedia('(dynamic-range: high)').matches;
-        return hdrOutput ? 'off' : 'force';
+        return hdrOutput ? 'off' : 'prototype';
     }
 
     private maybeStartPlayback(): void {

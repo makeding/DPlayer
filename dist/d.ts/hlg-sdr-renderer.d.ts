@@ -1,3 +1,5 @@
+import type createTlvDemuxModule from 'tlvdemux';
+type ColorLut = createTlvDemuxModule.HlgSdrColorLut;
 export default class HlgSdrRenderer {
     private readonly webGpuCanvas;
     private readonly webGlCanvas;
@@ -7,10 +9,11 @@ export default class HlgSdrRenderer {
     private readonly resizeObserver;
     private webGpuRequested;
     constructor(video: HTMLVideoElement, mediaPlane: HTMLElement);
-    setLut(lut: Uint8Array): void;
+    setColorLut(lut: ColorLut): void;
     setEnabled(enabled: boolean): void;
     destroy(): void;
     private preferWebGpu;
     private syncLayout;
 }
+export {};
 //# sourceMappingURL=hlg-sdr-renderer.d.ts.map
