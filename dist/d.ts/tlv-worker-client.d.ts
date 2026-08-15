@@ -84,7 +84,6 @@ export declare class WorkerDemuxer extends WorkerObject {
     setMseOutputEnabled(enabled: boolean): Promise<void>;
     setSubtitlePassthroughEnabled(enabled: boolean): Promise<void>;
     setMseToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): Promise<void>;
-    setMseSdrInHlg(videoTrackId: bigint, enabled: boolean): Promise<void>;
     hlgSdrToneMappingLut(): Promise<Uint8Array>;
     startIndex(growing: boolean): Promise<void>;
     finalizeIndex(): Promise<boolean>;
