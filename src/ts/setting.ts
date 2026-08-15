@@ -128,11 +128,12 @@ class Setting {
             const savedToneMappingMode = this.player.user.get('toneMappingMode');
             this.toneMappingMode = savedToneMappingMode === 2 ? 'force' : savedToneMappingMode === 0 ? 'off' : 'auto';
             this.updateToneMappingMode();
-            this.player.template.toneMappingModes.forEach(button => button.addEventListener('click', () => {
-                this.toneMappingMode = button.dataset.toneMappingMode as DPlayerType.ToneMappingMode;
+            this.player.template.toneMappingButton.addEventListener('click', () => {
+                this.toneMappingMode = this.toneMappingMode === 'auto' ? 'force' :
+                    this.toneMappingMode === 'force' ? 'off' : 'auto';
                 this.player.user.set('toneMappingMode', this.toneMappingMode === 'force' ? 2 : this.toneMappingMode === 'off' ? 0 : 1);
                 this.updateToneMappingMode();
-            }));
+            });
         }
 
         // loop
@@ -241,9 +242,10 @@ class Setting {
 
     private updateToneMappingMode(): void {
         this.player.setTLVToneMappingMode(this.toneMappingMode);
-        this.player.template.toneMappingModes.forEach(button => {
-            button.classList.toggle('dplayer-tone-mapping-current', button.dataset.toneMappingMode === this.toneMappingMode);
-        });
+        const label = this.toneMappingMode === 'force' ? 'On' : this.toneMappingMode === 'off' ? 'Off' : 'Auto';
+        this.player.template.toneMappingValue.textContent = label;
+        this.player.template.toneMappingButton.classList.toggle('dplayer-tone-mapping-active', this.toneMappingMode !== 'off');
+        this.player.template.toneMappingButton.setAttribute('aria-label', `HDR to SDR: ${label}`);
     }
 
     hide(): void {

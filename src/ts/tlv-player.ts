@@ -3,6 +3,7 @@ import type createTlvDemuxModule from 'tlvdemux';
 import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue';
 
 import type * as DPlayerType from './types';
+import HlgSdrRenderer from './hlg-sdr-renderer';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
 const MiB = 1024n * 1024n;
@@ -175,6 +176,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private queues: MseAppendQueue[] = [];
     private queueByType = new Map<string, MseAppendQueue>();
     private renderer: aribb62js.B62TTMLRenderer | null = null;
+    private readonly hlgSdrRenderer: HlgSdrRenderer;
     private subtitleOverlay: HTMLElement | null = null;
     private abortController: AbortController | null = null;
     private generation = 0;
@@ -194,10 +196,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private layerSwitchPending: LayerSwitchRequest | null = null;
     private automaticLayerPairSignature: string | null = null;
     private toneMappingMode: createTlvDemuxModule.MseToneMappingMode = 'auto';
+    private videoProperties: createTlvDemuxModule.MseVideoProperties | null = null;
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
         this.preferredVideoPacketId = bridge.source.videoPacketId ?? null;
+        this.hlgSdrRenderer = new HlgSdrRenderer(bridge.video, bridge.mediaPlane);
         void this.initialize();
     }
 
@@ -340,6 +344,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void {
         this.toneMappingMode = mode;
+        this.updateHlgSdrRenderer();
         const demuxer = this.demuxer;
         if (!demuxer) return;
         void demuxer.setMseToneMappingMode(mode).catch(error => {
@@ -399,6 +404,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.renderer = null;
         this.subtitleOverlay?.remove();
         this.subtitleOverlay = null;
+        this.hlgSdrRenderer.destroy();
         this.releaseMediaSource();
     }
 
@@ -439,6 +445,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.releaseMediaSource();
         this.tracks.length = 0;
         this.selectedTrackIds.clear();
+        this.videoProperties = null;
+        this.updateHlgSdrRenderer();
         this.playingStarted = false;
         this.createSubtitleRenderer();
 
@@ -543,6 +551,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onMseVideoStart: () => {
                 if (!active()) return;
                 if (!seekProbe) headVideoSeen = true;
+            },
+            onMseVideoProperties: properties => {
+                if (!active()) return;
+                this.videoProperties = properties;
+                this.updateHlgSdrRenderer();
             },
             onMseInit: init => {
                 if (!active()) return;
@@ -769,6 +782,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.demuxer = demuxer;
         await demuxer.initialized();
+        this.hlgSdrRenderer.setLut(await demuxer.hlgSdrToneMappingLut());
         await demuxer.setMseToneMappingMode(this.toneMappingMode);
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
@@ -923,6 +937,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         overlay.className = 'dplayer-aribb62-subtitle';
         Object.assign(overlay.style, {
             position: 'absolute',
+            zIndex: '1',
             inset: '0',
             pointerEvents: 'none',
             overflow: 'hidden',
@@ -937,6 +952,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.renderer.setTrackVisibility('caption', this.bridge.subtitleVisible());
         this.renderer.render();
+    }
+
+    private updateHlgSdrRenderer(): void {
+        const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
+        const enabled = sourceIsHlg && this.toneMappingMode !== 'off' &&
+            (this.toneMappingMode === 'force' || this.videoProperties?.sdrInHlg === true);
+        this.hlgSdrRenderer.setEnabled(enabled);
     }
 
     private maybeStartPlayback(): void {

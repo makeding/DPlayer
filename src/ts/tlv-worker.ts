@@ -107,6 +107,7 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
     } = {
         mseMaxAudioChannels: record.selection.maxAudioChannels,
         onMseVideoStart: event('onMseVideoStart'),
+        onMseVideoProperties: event('onMseVideoProperties'),
         onMseVideoSplice: event('onMseVideoSplice'),
         onMseAudioSplice: event('onMseAudioSplice'),
         onMseLayerSwitch: event('onMseLayerSwitch'),

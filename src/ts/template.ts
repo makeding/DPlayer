@@ -56,7 +56,8 @@ class Template {
     audioValue!: HTMLElement;
     audioHeader!: HTMLElement;
     audioItem!: NodeListOf<HTMLElement>;
-    toneMappingModes!: NodeListOf<HTMLButtonElement>;
+    toneMappingButton!: HTMLElement;
+    toneMappingValue!: HTMLElement;
     danmakuOpacityBar!: HTMLElement;
     danmakuOpacityBarWrap!: HTMLElement;
     danmakuOpacityBarWrapWrap!: HTMLElement;
@@ -173,7 +174,8 @@ class Template {
         this.audioValue = this.container.querySelector('.dplayer-setting-audio .dplayer-label-value')!;
         this.audioHeader = this.container.querySelector('.dplayer-setting-audio-header')!;
         this.audioItem = this.container.querySelectorAll<HTMLElement>('.dplayer-setting-audio-item')!;
-        this.toneMappingModes = this.container.querySelectorAll<HTMLButtonElement>('[data-tone-mapping-mode]')!;
+        this.toneMappingButton = this.container.querySelector('.dplayer-tone-mapping-icon')!;
+        this.toneMappingValue = this.container.querySelector('.dplayer-tone-mapping-value')!;
         this.danmakuOpacityBar = this.container.querySelector('.dplayer-danmaku-bar-inner')!;
         this.danmakuOpacityBarWrap = this.container.querySelector('.dplayer-danmaku-bar')!;
         this.danmakuOpacityBarWrapWrap = this.container.querySelector('.dplayer-danmaku-bar-wrap')!;

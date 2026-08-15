@@ -25,6 +25,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private queues;
     private queueByType;
     private renderer;
+    private readonly hlgSdrRenderer;
     private subtitleOverlay;
     private abortController;
     private generation;
@@ -44,6 +45,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private layerSwitchPending;
     private automaticLayerPairSignature;
     private toneMappingMode;
+    private videoProperties;
     constructor(bridge: PlayerBridge);
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
@@ -69,6 +71,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private fetchRange;
     private fetch;
     private createSubtitleRenderer;
+    private updateHlgSdrRenderer;
     private maybeStartPlayback;
     private applyBackpressure;
     private bufferedAhead;
