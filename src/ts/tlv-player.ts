@@ -347,7 +347,15 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.updateHlgSdrRenderer();
         const demuxer = this.demuxer;
         if (!demuxer) return;
-        void demuxer.setMseToneMappingMode(mode).catch(error => {
+        const selectedVideoTrackId = this.selectedTrackIds.get('video');
+        void demuxer.setMseToneMappingMode(mode).then(async () => {
+            // Force the currently selected track through the dedicated
+            // signalling switch as well.  tlvdemux emits the rewritten SDR
+            // init segment at the next RAP and reports output transfer=1.
+            if (selectedVideoTrackId !== undefined && mode !== 'auto') {
+                await demuxer.setMseSdrInHlg(selectedVideoTrackId, mode === 'force');
+            }
+        }).catch(error => {
             if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
         });
     }
@@ -955,11 +963,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private updateHlgSdrRenderer(): void {
         const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
-        // Keep this exactly aligned with tlvdemux/demo/demo.js.  `force`
-        // changes the MSE SPS policy first; the LUT remains an HLG-only
-        // correction and must wait for the resulting video properties.
-        const enabled = sourceIsHlg && this.toneMappingMode !== 'off' &&
-            (this.toneMappingMode === 'force' || this.videoProperties?.sdrInHlg === true);
+        const outputIsSdr = this.videoProperties?.outputColor?.transfer === 1;
+        // Do not sample the browser's HDR presentation.  The LUT belongs to
+        // the rewritten SDR path and starts only after tlvdemux confirms that
+        // the next-RAP init segment removed the HLG transfer declaration.
+        const enabled = sourceIsHlg && outputIsSdr &&
+            this.videoProperties?.sdrInHlg === true && this.toneMappingMode !== 'off';
         this.hlgSdrRenderer.setEnabled(enabled);
     }
 
