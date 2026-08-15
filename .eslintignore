@@ -1,3 +1,5 @@
 dist
 demo
 webpack/*.js
+src/ts/hlg-sdr-lut.js
+src/ts/webgpu-hlg-sdr.js

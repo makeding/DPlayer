@@ -3,7 +3,7 @@ import type createTlvDemuxModule from 'tlvdemux';
 import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue';
 
 import type * as DPlayerType from './types';
-import HlgSdrRenderer from './hlg-sdr-renderer';
+import HlgSdrRenderer from './hlg-sdr-demo-renderer';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
 const MiB = 1024n * 1024n;
@@ -343,17 +343,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void {
-        if (mode === this.toneMappingMode) return;
         this.toneMappingMode = mode;
-        if (!this.workerReady || this.destroyed) return;
-
-        // The policy only affects init/media generated after the next RAP;
-        // already buffered MSE data keeps its old colour signalling. Rebuild
-        // from the current position so the new demuxer applies the mode before
-        // it sees the first video packet and emits the first init segment.
-        const restartTime = this.bridge.live ? 0 : this.bridge.video.currentTime;
-        void this.restart(restartTime).catch(error => {
-            if (!this.destroyed) this.fail(error);
+        const demuxer = this.demuxer;
+        if (!demuxer) {
+            this.updateHlgSdrRenderer();
+            return;
+        }
+        void demuxer.setMseToneMappingMode(mode).then(() => {
+            if (this.demuxer === demuxer && !this.destroyed) this.updateHlgSdrRenderer();
+        }).catch(error => {
+            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
         });
     }
 
@@ -960,11 +959,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private updateHlgSdrRenderer(): void {
         const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
-        const outputIsSdr = this.videoProperties?.outputColor?.transfer === 1;
-        // Do not sample the browser's HDR presentation.  The LUT belongs to
-        // the rewritten SDR path and starts only after tlvdemux confirms that
-        // the next-RAP init segment removed the HLG transfer declaration.
-        const enabled = sourceIsHlg && outputIsSdr && this.videoProperties?.sdrInHlg === true;
+        const enabled = sourceIsHlg && this.toneMappingMode !== 'off' &&
+            (this.toneMappingMode === 'force' || this.videoProperties?.sdrInHlg === true);
         this.hlgSdrRenderer.setEnabled(enabled);
     }
 
