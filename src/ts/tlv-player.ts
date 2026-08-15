@@ -343,11 +343,17 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void {
+        if (mode === this.toneMappingMode) return;
         this.toneMappingMode = mode;
-        const demuxer = this.demuxer;
-        if (!demuxer) return;
-        void demuxer.setMseToneMappingMode(mode).catch(error => {
-            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
+        if (!this.workerReady || this.destroyed) return;
+
+        // The policy only affects init/media generated after the next RAP;
+        // already buffered MSE data keeps its old colour signalling. Rebuild
+        // from the current position so the new demuxer applies the mode before
+        // it sees the first video packet and emits the first init segment.
+        const restartTime = this.bridge.live ? 0 : this.bridge.video.currentTime;
+        void this.restart(restartTime).catch(error => {
+            if (!this.destroyed) this.fail(error);
         });
     }
 
