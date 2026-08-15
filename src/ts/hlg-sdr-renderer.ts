@@ -1,5 +1,6 @@
-// Adapted from tlvdemux/demo/{webgpu-hlg-sdr,hlg-sdr-lut}.js.  The demo's
-// side-by-side comparison is intentionally changed to a full-frame overlay.
+// This is the tlvdemux demo renderer with its comparison crop removed.  Colour
+// policy lives in tlvdemux: this canvas only applies the demo's final LUT to
+// the decoded, already re-signalled HLG-SDR video.
 const webGlVertexShader = `
 attribute vec2 aPosition;
 varying vec2 vTextureCoordinate;
@@ -14,10 +15,10 @@ uniform sampler2D uToneMap;
 varying vec2 vTextureCoordinate;
 void main() {
   vec4 sample = texture2D(uVideo, vTextureCoordinate);
-  float luma = dot(sample.rgb, vec3(0.2627, 0.6780, 0.0593));
-  float mappedLuma = texture2D(uToneMap, vec2(luma, 0.5)).r;
-  if (luma <= 0.0001) gl_FragColor = vec4(0.0, 0.0, 0.0, sample.a);
-  else gl_FragColor = vec4(min(sample.rgb * (mappedLuma / luma), vec3(1.0)), sample.a);
+  float toneMapR = texture2D(uToneMap, vec2(sample.r, 0.5)).r;
+  float toneMapG = texture2D(uToneMap, vec2(sample.g, 0.5)).r;
+  float toneMapB = texture2D(uToneMap, vec2(sample.b, 0.5)).r;
+  gl_FragColor = vec4(toneMapR, toneMapG, toneMapB, sample.a);
 }`;
 const webGpuShader = /* wgsl */`
 struct Output { @builtin(position) position: vec4f, @location(0) uv: vec2f }
@@ -61,7 +62,11 @@ class WebGlHlgSdrRenderer {
     private failed = false;
     private lut: Uint8Array | null = null;
 
-    constructor(private readonly video: HTMLVideoElement, private readonly canvas: HTMLCanvasElement) {
+    constructor(
+        private readonly video: HTMLVideoElement,
+        private readonly canvas: HTMLCanvasElement,
+        private readonly onError: (error: Error) => void,
+    ) {
         video.addEventListener('play', this.schedule);
         video.addEventListener('pause', this.cancelFrame);
         canvas.hidden = true;
@@ -109,8 +114,9 @@ class WebGlHlgSdrRenderer {
             this.toneMapTexture = this.createTexture(gl);
             this.uploadLut();
             return true;
-        } catch {
+        } catch (error) {
             this.failed = true;
+            this.onError(error instanceof Error ? error : new Error(String(error)));
             return false;
         }
     }
@@ -142,20 +148,30 @@ class WebGlHlgSdrRenderer {
     }
     private draw = (): void => {
         if (!this.enabled || !this.gl || !this.program || this.video.readyState < 2 || !this.video.videoWidth) return;
-        this.resize();
-        const gl = this.gl;
-        gl.clearColor(0, 0, 0, 0);
-        gl.clear(gl.COLOR_BUFFER_BIT);
-        gl.useProgram(this.program);
-        gl.activeTexture(gl.TEXTURE0);
-        gl.bindTexture(gl.TEXTURE_2D, this.videoTexture);
-        gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
-        gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
-        gl.activeTexture(gl.TEXTURE1);
-        gl.bindTexture(gl.TEXTURE_2D, this.toneMapTexture);
-        gl.uniform1i(this.videoUniform, 0);
-        gl.uniform1i(this.toneMapUniform, 1);
-        gl.drawArrays(gl.TRIANGLES, 0, 6);
+        try {
+            this.resize();
+            const gl = this.gl;
+            gl.clearColor(0, 0, 0, 0);
+            gl.clear(gl.COLOR_BUFFER_BIT);
+            gl.useProgram(this.program);
+            gl.activeTexture(gl.TEXTURE0);
+            gl.bindTexture(gl.TEXTURE_2D, this.videoTexture);
+            gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, true);
+            gl.texImage2D(gl.TEXTURE_2D, 0, gl.RGBA, gl.RGBA, gl.UNSIGNED_BYTE, this.video);
+            gl.activeTexture(gl.TEXTURE1);
+            gl.bindTexture(gl.TEXTURE_2D, this.toneMapTexture);
+            gl.uniform1i(this.videoUniform, 0);
+            gl.uniform1i(this.toneMapUniform, 1);
+            gl.drawArrays(gl.TRIANGLES, 0, 6);
+            const status = gl.getError();
+            if (status !== gl.NO_ERROR) throw new Error(`WebGL frame upload failed (0x${status.toString(16)})`);
+        } catch (error) {
+            this.failed = true;
+            this.enabled = false;
+            this.canvas.hidden = true;
+            this.cancelFrame();
+            this.onError(error instanceof Error ? error : new Error(String(error)));
+        }
     };
     private schedule = (): void => {
         if (!this.enabled || this.video.paused || this.video.ended || this.frameRequest !== null || this.animationRequest !== null) return;
@@ -183,7 +199,12 @@ class WebGpuHlgSdrRenderer {
     private initializing: Promise<boolean> | null = null;
     private frameRequest: number | null = null;
     private animationRequest: number | null = null;
-    constructor(private readonly video: HTMLVideoElement, private readonly canvas: HTMLCanvasElement) {
+    constructor(
+        private readonly video: HTMLVideoElement,
+        private readonly canvas: HTMLCanvasElement,
+        private readonly onError: (error: Error) => void,
+        private readonly onLost: () => void,
+    ) {
         video.addEventListener('play', this.schedule);
         video.addEventListener('pause', this.cancelFrame);
         canvas.hidden = true;
@@ -221,11 +242,21 @@ class WebGpuHlgSdrRenderer {
             const format = gpu.getPreferredCanvasFormat();
             this.pipeline = this.device.createRenderPipeline({layout: 'auto', vertex: {module: this.device.createShaderModule({code: webGpuShader}), entryPoint: 'vertex'}, fragment: {module: this.device.createShaderModule({code: webGpuShader}), entryPoint: 'fragment', targets: [{format}]}, primitive: {topology: 'triangle-list'}});
             this.sampler = this.device.createSampler({magFilter: 'linear', minFilter: 'linear'});
-            this.device.lost.then(() => { this.failed = true; this.enabled = false; this.cancelFrame(); this.canvas.hidden = true; });
+            this.device.lost.then(() => {
+                this.failed = true;
+                this.enabled = false;
+                this.cancelFrame();
+                this.canvas.hidden = true;
+                this.onLost();
+            });
             this.resize(format);
             this.uploadLut();
             return true;
-        } catch { this.failed = true; return false; }
+        } catch (error) {
+            this.failed = true;
+            this.onError(error instanceof Error ? error : new Error(String(error)));
+            return false;
+        }
     }
     private uploadLut(): void {
         if (!this.device || !this.lut) return;
@@ -246,12 +277,20 @@ class WebGpuHlgSdrRenderer {
     }
     private draw = (): void => {
         if (!this.enabled || !this.device || !this.context || !this.pipeline || !this.lutTexture || this.video.readyState < 2 || !this.video.videoWidth) return;
-        this.resize();
-        const bindGroup = this.device.createBindGroup({layout: this.pipeline.getBindGroupLayout(0), entries: [{binding: 0, resource: this.device.importExternalTexture({source: this.video})}, {binding: 1, resource: this.sampler}, {binding: 2, resource: this.lutTexture.createView()}]});
-        const encoder = this.device.createCommandEncoder();
-        const pass = encoder.beginRenderPass({colorAttachments: [{view: this.context.getCurrentTexture().createView(), clearValue: {r: 0, g: 0, b: 0, a: 0}, loadOp: 'clear', storeOp: 'store'}]});
-        pass.setPipeline(this.pipeline); pass.setBindGroup(0, bindGroup); pass.draw(3); pass.end();
-        this.device.queue.submit([encoder.finish()]);
+        try {
+            this.resize();
+            const bindGroup = this.device.createBindGroup({layout: this.pipeline.getBindGroupLayout(0), entries: [{binding: 0, resource: this.device.importExternalTexture({source: this.video})}, {binding: 1, resource: this.sampler}, {binding: 2, resource: this.lutTexture.createView()}]});
+            const encoder = this.device.createCommandEncoder();
+            const pass = encoder.beginRenderPass({colorAttachments: [{view: this.context.getCurrentTexture().createView(), clearValue: {r: 0, g: 0, b: 0, a: 0}, loadOp: 'clear', storeOp: 'store'}]});
+            pass.setPipeline(this.pipeline); pass.setBindGroup(0, bindGroup); pass.draw(3); pass.end();
+            this.device.queue.submit([encoder.finish()]);
+        } catch (error) {
+            this.failed = true;
+            this.enabled = false;
+            this.canvas.hidden = true;
+            this.cancelFrame();
+            this.onError(error instanceof Error ? error : new Error(String(error)));
+        }
     };
     private schedule = (): void => {
         if (!this.enabled || this.video.paused || this.video.ended || this.frameRequest !== null || this.animationRequest !== null) return;
@@ -280,8 +319,13 @@ export default class HlgSdrRenderer {
             Object.assign(canvas.style, {position: 'absolute', zIndex: '2', inset: '0', width: '100%', height: '100%', pointerEvents: 'none'});
             mediaPlane.append(canvas);
         }
-        this.webGpu = new WebGpuHlgSdrRenderer(video, this.webGpuCanvas);
-        this.webGl = new WebGlHlgSdrRenderer(video, this.webGlCanvas);
+        const reportError = (backend: string) => (error: Error) => console.warn(`[DPlayer] ${backend} HLG-SDR renderer unavailable:`, error);
+        this.webGl = new WebGlHlgSdrRenderer(video, this.webGlCanvas, reportError('WebGL'));
+        const useWebGlFallback = (error?: Error) => {
+            if (error) reportError('WebGPU')(error);
+            if (this.enabled) this.webGl.setEnabled(true);
+        };
+        this.webGpu = new WebGpuHlgSdrRenderer(video, this.webGpuCanvas, useWebGlFallback, useWebGlFallback);
         this.layoutObserver = new MutationObserver(() => this.syncLayout(video));
         this.layoutObserver.observe(video, {attributes: true, attributeFilter: ['style']});
         this.resizeObserver = new ResizeObserver(() => this.syncLayout(video));
@@ -296,14 +340,12 @@ export default class HlgSdrRenderer {
     setEnabled(enabled: boolean): void {
         this.enabled = enabled;
         if (!enabled) { this.webGl.setEnabled(false); void this.webGpu.setEnabled(false); return; }
-        // WebGPU external textures may be available but reject an MSE-backed
-        // video only while drawing. Prefer the demo's synchronous WebGL path
-        // so a transparent WebGPU canvas cannot mask the working fallback.
-        if (this.webGl.setEnabled(true)) {
-            void this.webGpu.setEnabled(false);
-            return;
-        }
-        void this.webGpu.setEnabled(true);
+        // Same policy as the tlvdemux demo: ExternalTexture first, with WebGL
+        // only as the fallback.  Never let both canvases mask each other.
+        void this.webGpu.setEnabled(true).then(active => {
+            if (!this.enabled) return;
+            this.webGl.setEnabled(!active);
+        });
     }
     destroy(): void {
         this.layoutObserver.disconnect();

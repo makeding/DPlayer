@@ -955,8 +955,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private updateHlgSdrRenderer(): void {
         const sourceIsHlg = this.videoProperties?.sourceColor?.transfer === 18;
-        const enabled = this.toneMappingMode === 'force' ||
-            (sourceIsHlg && this.toneMappingMode === 'auto' && this.videoProperties?.sdrInHlg === true);
+        // Keep this exactly aligned with tlvdemux/demo/demo.js.  `force`
+        // changes the MSE SPS policy first; the LUT remains an HLG-only
+        // correction and must wait for the resulting video properties.
+        const enabled = sourceIsHlg && this.toneMappingMode !== 'off' &&
+            (this.toneMappingMode === 'force' || this.videoProperties?.sdrInHlg === true);
         this.hlgSdrRenderer.setEnabled(enabled);
     }
 
