@@ -61,7 +61,7 @@
     <div class="dplayer-icons dplayer-icons-right">
         {{ if options.video.type === 'tlv' }}
         <div class="dplayer-tone-mapping" style="--theme-color:{{ options.theme }}">
-            <button class="dplayer-icon dplayer-tone-mapping-icon" aria-label="{{ tran('HDR to SDR') }}" data-balloon-nofocus data-balloon-pos="up">
+            <button class="dplayer-icon dplayer-tone-mapping-icon" aria-label="HDR → SDR 変換：自動" data-balloon-nofocus data-balloon-pos="up">
                 <span class="dplayer-tone-mapping-logo">HDR</span>
                 <span class="dplayer-tone-mapping-value">AUTO</span>
             </button>

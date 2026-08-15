@@ -279,25 +279,35 @@
                 height: 38px;
                 vertical-align: top;
                 .dplayer-tone-mapping-icon {
-                    padding: 5px 8px 3px;
+                    position: relative;
+                    padding: 7px 6px;
                 }
                 .dplayer-tone-mapping-logo {
                     display: block;
                     margin: 0 auto;
-                    border: 1px solid currentColor;
-                    border-radius: 2px;
+                    box-sizing: border-box;
+                    border: 2px solid currentColor;
+                    border-radius: 3px;
                     color: #e0e0e0;
-                    font-size: 9px;
+                    font-size: 12px;
                     font-weight: 700;
-                    line-height: 12px;
+                    line-height: 18px;
                     text-align: center;
-                    width: 21px;
+                    width: 28px;
+                    height: 22px;
                 }
                 .dplayer-tone-mapping-value {
+                    position: absolute;
+                    right: 1px;
+                    bottom: 2px;
                     display: block;
+                    padding: 0 1px;
+                    border-radius: 2px;
+                    background: rgba(0, 0, 0, .85);
                     color: #e0e0e0;
-                    font-size: 8px;
-                    line-height: 10px;
+                    font-size: 6px;
+                    line-height: 8px;
+                    letter-spacing: -.2px;
                     text-align: center;
                 }
                 .dplayer-tone-mapping-icon.dplayer-tone-mapping-active .dplayer-tone-mapping-logo {
