@@ -59,6 +59,14 @@
         {{ /if }}
     </div>
     <div class="dplayer-icons dplayer-icons-right">
+        {{ if options.video.type === 'tlv' }}
+        <div class="dplayer-tone-mapping" style="--theme-color:{{ options.theme }}">
+            <button class="dplayer-icon dplayer-tone-mapping-icon" aria-label="{{ tran('HDR to SDR') }}" data-balloon-nofocus data-balloon-pos="up">
+                <span class="dplayer-tone-mapping-logo">HDR</span>
+                <span class="dplayer-tone-mapping-value">Auto</span>
+            </button>
+        </div>
+        {{ /if }}
         {{ if options.screenshot }}
         <div class="dplayer-icon dplayer-camera-icon" aria-label="{{ tran('Screenshot') }}" data-balloon-nofocus data-balloon-pos="up">
             <span class="dplayer-icon-content">{{@ icons.camera }}</span>
@@ -78,14 +86,6 @@
         <div class="dplayer-subtitle-btn">
             <button class="dplayer-icon dplayer-subtitle-icon" aria-label="{{ tran('Hide subtitle') }}" data-balloon-nofocus data-balloon-pos="up">
                 <span class="dplayer-icon-content">{{@ icons.subtitle }}</span>
-            </button>
-        </div>
-        {{ /if }}
-        {{ if options.video.type === 'tlv' }}
-        <div class="dplayer-tone-mapping" style="--theme-color:{{ options.theme }}">
-            <button class="dplayer-icon dplayer-tone-mapping-icon" aria-label="{{ tran('HDR to SDR') }}" data-balloon-nofocus data-balloon-pos="up">
-                <span class="dplayer-tone-mapping-logo">HDR</span>
-                <span class="dplayer-tone-mapping-value">Auto</span>
             </button>
         </div>
         {{ /if }}

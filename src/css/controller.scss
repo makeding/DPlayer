@@ -274,6 +274,36 @@
                     }
                 }
             }
+            .dplayer-tone-mapping {
+                display: inline-block;
+                height: 38px;
+                vertical-align: top;
+                .dplayer-tone-mapping-icon {
+                    padding: 5px 8px 3px;
+                }
+                .dplayer-tone-mapping-logo {
+                    display: block;
+                    margin: 0 auto;
+                    border: 1px solid currentColor;
+                    border-radius: 2px;
+                    color: #e0e0e0;
+                    font-size: 9px;
+                    font-weight: 700;
+                    line-height: 12px;
+                    text-align: center;
+                    width: 21px;
+                }
+                .dplayer-tone-mapping-value {
+                    display: block;
+                    color: #e0e0e0;
+                    font-size: 8px;
+                    line-height: 10px;
+                    text-align: center;
+                }
+                .dplayer-tone-mapping-icon.dplayer-tone-mapping-active .dplayer-tone-mapping-logo {
+                    color: var(--theme-color, #fff);
+                }
+            }
         }
         .dplayer-time {
             line-height: 38px;
@@ -737,34 +767,6 @@
                     }
                 }
             }
-        }
-    }
-    .dplayer-tone-mapping {
-        display: inline-block;
-        position: relative;
-        height: 100%;
-        .dplayer-tone-mapping-icon.dplayer-tone-mapping-active .dplayer-tone-mapping-logo {
-            color: var(--theme-color, #fff);
-        }
-        .dplayer-tone-mapping-logo {
-            display: block;
-            margin: 2px auto 0;
-            border: 1px solid currentColor;
-            border-radius: 2px;
-            color: #e0e0e0;
-            font-size: 9px;
-            font-weight: 700;
-            line-height: 12px;
-            text-align: center;
-            width: 21px;
-        }
-        .dplayer-tone-mapping-value {
-            display: block;
-            margin-top: -1px;
-            color: #e0e0e0;
-            font-size: 8px;
-            line-height: 10px;
-            text-align: center;
         }
     }
 }
