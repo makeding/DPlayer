@@ -21,6 +21,7 @@ import HotKey from './hotkey';
 import ContextMenu from './contextmenu';
 import InfoPanel from './info-panel';
 import TLVPlayer from './tlv-player';
+import TLVQuality, {installDynamicTLVQualities} from './tlv-quality';
 import tplVideo from '../template/video.art';
 import defaultApiBackend from './api';
 import * as DPlayerType from './types';
@@ -45,6 +46,7 @@ class DPlayer {
     subtitle: Subtitle | null = null;
     template: Template;
     timer: Timer;
+    tlvQuality: TLVQuality;
     user: User;
 
     container: HTMLElement;
@@ -74,13 +76,13 @@ class DPlayer {
      */
     constructor(options: DPlayerType.Options) {
         this.options = handleOption({ preload: options.video.type === 'webtorrent' ? 'none' : 'metadata', ...options });
-
+        // @ts-expect-error TS(7009): 'new' expression, whose target lacks a construct s... Remove this comment to see the full error message
+        this.tran = new i18n(this.options.lang).tran;
+        installDynamicTLVQualities(this.options, this.tran('Rain broadcast'));
         if (this.options.video.quality) {
             this.qualityIndex = this.options.video.defaultQuality!;
             this.quality = this.options.video.quality[this.options.video.defaultQuality!];
         }
-        // @ts-expect-error TS(7009): 'new' expression, whose target lacks a construct s... Remove this comment to see the full error message
-        this.tran = new i18n(this.options.lang).tran;
         this.events = new Events();
         this.user = new User(this);
         this.container = this.options.container;
@@ -155,6 +157,7 @@ class DPlayer {
         this.initVideo(this.video, (this.quality && this.quality.type) || this.options.video.type);
 
         this.setting = new Setting(this);
+        this.tlvQuality = new TLVQuality(this);
 
         this.infoPanel = new InfoPanel(this);
 
@@ -561,6 +564,7 @@ class DPlayer {
             delete this.plugins.tlv;
         }
         this.type = type;
+        this.tlvQuality?.reset();
         if (this.options.video.customType && this.options.video.customType[type]) {
             if (Object.prototype.toString.call(this.options.video.customType[type]) === '[object Function]') {
                 this.options.video.customType[type](this.video, this);
@@ -872,6 +876,11 @@ class DPlayer {
                                     }
                                 }
                                 this.setAudioSwitchingAvailable(choices.size >= 2);
+                            }
+                            if (name === 'tlv_mpt_snapshot') {
+                                this.tlvQuality?.sync(detail as DPlayerType.TLVMptSnapshot);
+                            } else if (name === 'tlv_layer_change') {
+                                this.tlvQuality?.syncSelection(detail as DPlayerType.TLVLayerChange);
                             }
                             this.events.trigger(name, detail);
                         },

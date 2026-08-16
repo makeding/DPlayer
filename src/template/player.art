@@ -176,7 +176,7 @@
             <span class="dplayer-label">{{ tran('Quality') }}</span>
         </div>
         {{ each options.video.quality }}
-            <div class="dplayer-setting-quality-item {{ $value.name === options.video.quality[options.video.defaultQuality].name ? 'dplayer-setting-quality-current' : '' }}" data-index="{{ $index }}">
+            <div class="dplayer-setting-quality-item {{ $value.name === options.video.quality[options.video.defaultQuality].name ? 'dplayer-setting-quality-current' : '' }}" data-index="{{ $index }}" {{ if $value.tlvDynamicLayer && $value.tlvDynamicLayer.role === 'fallback' }}hidden{{ /if }}>
                 <div class="dplayer-toggle">{{@ icons.check }}</div>
                 <span class="dplayer-label">{{ $value.name }}</span>
             </div>

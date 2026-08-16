@@ -13,6 +13,7 @@ import Comment from './comment';
 import HotKey from './hotkey';
 import ContextMenu from './contextmenu';
 import InfoPanel from './info-panel';
+import TLVQuality from './tlv-quality';
 import * as DPlayerType from './types';
 declare class DPlayer {
     bar: Bar;
@@ -29,6 +30,7 @@ declare class DPlayer {
     subtitle: Subtitle | null;
     template: Template;
     timer: Timer;
+    tlvQuality: TLVQuality;
     user: User;
     container: HTMLElement;
     containerClickFun: () => void;

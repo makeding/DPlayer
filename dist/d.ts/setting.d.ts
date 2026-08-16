@@ -11,6 +11,8 @@ declare class Setting {
     resizeObserver: ResizeObserver;
     constructor(player: DPlayer);
     private updateToneMappingMode;
+    setQualityItemVisible(index: number, visible: boolean): void;
+    private syncQualityPanelHeight;
     hide(): void;
     show(): void;
     destroy(): void;

@@ -4,6 +4,7 @@ import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue'
 
 import type * as DPlayerType from './types';
 import HlgSdrRenderer from './hlg-sdr-player-renderer';
+import {resolveTLVLayerPair} from './tlv-layer-selection';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
 const MiB = 1024n * 1024n;
@@ -114,35 +115,6 @@ type LayerSwitchRequest = {
     reject: (error: Error) => void;
 };
 
-function selectionLevel(track: DPlayerType.TLVTrackInfo, groupIdentification: number | null = null): number | null {
-    const group = track.assetGroups.find(candidate =>
-        (groupIdentification === null || candidate.groupIdentification === groupIdentification));
-    if (group) return group.selectionLevel;
-    return track.kind === 'video' && groupIdentification === null && track.assetGroups.length === 0 ? 0 : null;
-}
-
-function sameVideoLayerGroup(left: DPlayerType.TLVTrackInfo, right: DPlayerType.TLVTrackInfo): boolean {
-    if (left.kind !== 'video' || right.kind !== 'video' || left.contextId !== right.contextId) return false;
-    if (!left.assetGroups.length || !right.assetGroups.length) return true;
-    return left.assetGroups.some(leftGroup => right.assetGroups.some(rightGroup =>
-        leftGroup.groupIdentification === rightGroup.groupIdentification));
-}
-
-function correspondingAudioTrack(
-    tracks: DPlayerType.TLVTrackInfo[],
-    current: DPlayerType.TLVTrackInfo,
-    targetLevel: number | null,
-): DPlayerType.TLVTrackInfo | null {
-    if (targetLevel === null) return null;
-    const groupIds = current.assetGroups.map(group => group.groupIdentification);
-    for (const groupId of groupIds) {
-        const track = tracks.find(candidate => candidate.kind === 'audio' && candidate.assetGroups.some(group =>
-            group.groupIdentification === groupId && group.selectionLevel === targetLevel));
-        if (track) return track;
-    }
-    return null;
-}
-
 function intersectRanges(
     left: Array<{start: number; end: number}>,
     right: Array<{start: number; end: number}>,
@@ -205,6 +177,15 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.preferredVideoPacketId = bridge.source.videoPacketId ?? null;
         this.hlgSdrRenderer = new HlgSdrRenderer(bridge.video, bridge.mediaPlane);
         void this.initialize();
+    }
+
+    layerPair(tracks: readonly DPlayerType.TLVTrackInfo[] = this.tracks): DPlayerType.TLVLayerPair | null {
+        const currentVideo = this.tracks.find(track =>
+            track.kind === 'video' && track.trackId === this.selectedTrackIds.get('video'));
+        const currentAudio = this.tracks.find(track =>
+            track.kind === 'audio' && track.trackId === this.selectedTrackIds.get('audio'));
+        if (!currentVideo || !currentAudio) return null;
+        return resolveTLVLayerPair(tracks, currentVideo, currentAudio);
     }
 
     async seek(time: number): Promise<void> {
@@ -1040,28 +1021,19 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             }
             return;
         }
-        const selectedVideo = this.tracks.find(track =>
-            track.kind === 'video' && track.trackId === this.selectedTrackIds.get('video'));
-        const selectedAudio = this.tracks.find(track =>
-            track.kind === 'audio' && track.trackId === this.selectedTrackIds.get('audio'));
-        if (!selectedVideo || !selectedAudio) return;
-        const videos = this.tracks
-            .filter(track => sameVideoLayerGroup(selectedVideo, track))
-            .sort((left, right) =>
-                (selectionLevel(left) ?? 0xff) - (selectionLevel(right) ?? 0xff));
-        const preferredVideo = videos[0];
-        const fallbackVideo = videos.find(track =>
-            selectionLevel(track) !== null && selectionLevel(track)! > (selectionLevel(preferredVideo) ?? 0xff));
-        if (!preferredVideo || !fallbackVideo) return;
-        const preferredAudio = correspondingAudioTrack(this.tracks, selectedAudio, selectionLevel(preferredVideo));
-        const fallbackAudio = correspondingAudioTrack(this.tracks, selectedAudio, selectionLevel(fallbackVideo));
-        if (!preferredAudio || !fallbackAudio) return;
-        const signature = [preferredVideo.trackId, preferredAudio.trackId, fallbackVideo.trackId, fallbackAudio.trackId].join(':');
+        const pair = this.layerPair();
+        if (!pair?.fallback) return;
+        const signature = [
+            pair.preferred.video.trackId,
+            pair.preferred.audio.trackId,
+            pair.fallback.video.trackId,
+            pair.fallback.audio.trackId,
+        ].join(':');
         if (signature === this.automaticLayerPairSignature) return;
         this.automaticLayerPairSignature = signature;
         void demuxer.configureAutomaticLayerSwitch(
-            preferredVideo.trackId, preferredAudio.trackId,
-            fallbackVideo.trackId, fallbackAudio.trackId,
+            pair.preferred.video.trackId, pair.preferred.audio.trackId,
+            pair.fallback.video.trackId, pair.fallback.audio.trackId,
         );
     }
 

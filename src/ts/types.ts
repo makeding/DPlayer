@@ -401,6 +401,14 @@ export interface TLVLayerChange {
     videoPresentationTimeUs: bigint;
     audioPresentationTimeUs: bigint;
 }
+export interface TLVLayer {
+    video: TLVTrackInfo;
+    audio: TLVTrackInfo;
+}
+export interface TLVLayerPair {
+    preferred: TLVLayer;
+    fallback: TLVLayer | null;
+}
 export interface TLVViewerParticipationNotification {
     contextId: number;
     sourcePacketId: number;
@@ -434,6 +442,7 @@ export interface TLVCaptionData {
 }
 export interface TLVPlugin {
     readonly tracks: readonly TLVTrackInfo[];
+    layerPair(tracks?: readonly TLVTrackInfo[]): TLVLayerPair | null;
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
@@ -633,6 +642,12 @@ export interface VideoQualityInternal {
     url: string;
     type: VideoType | string;
     tlv?: TLVSourceOptions;
+    tlvDynamicLayer?: {
+        role: 'preferred' | 'fallback';
+        sourceIndex: number;
+        videoPacketId?: number;
+        audioPacketId?: number;
+    };
 }
 
 export interface SubtitleInternal {

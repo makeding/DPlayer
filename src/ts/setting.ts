@@ -47,9 +47,11 @@ class Setting {
                     if (this.player.switchingQuality) {
                         return;
                     }
-                    this.player.switchQuality(parseInt(this.player.template.qualityItem[i].dataset.index!));
+                    const index = parseInt(this.player.template.qualityItem[i].dataset.index!);
+                    if (!this.player.tlvQuality.select(index)) this.player.switchQuality(index);
                 });
             }
+            this.syncQualityPanelHeight();
         }
 
         // speed
@@ -264,6 +266,18 @@ class Setting {
         this.player.template.toneMappingValue.textContent = label;
         this.player.template.toneMappingButton.classList.toggle('dplayer-tone-mapping-active', this.toneMappingMode !== 'off');
         this.player.template.toneMappingButton.setAttribute('aria-label', `HDR → SDR 変換：${description}（${comparisonHint}）`);
+    }
+
+    setQualityItemVisible(index: number, visible: boolean): void {
+        const item = this.player.template.qualityItem[index];
+        if (!item) return;
+        item.hidden = !visible;
+        this.syncQualityPanelHeight();
+    }
+
+    private syncQualityPanelHeight(): void {
+        const visibleItems = Array.from(this.player.template.qualityItem).filter(item => !item.hidden).length;
+        this.player.template.settingBox.style.setProperty('--quality-length', String(visibleItems));
     }
 
     hide(): void {

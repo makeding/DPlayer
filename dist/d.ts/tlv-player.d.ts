@@ -49,6 +49,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private hlgSdrPrototypeColorLut;
     private videoProperties;
     constructor(bridge: PlayerBridge);
+    layerPair(tracks?: readonly DPlayerType.TLVTrackInfo[]): DPlayerType.TLVLayerPair | null;
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;

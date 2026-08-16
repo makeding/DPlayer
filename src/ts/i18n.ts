@@ -77,6 +77,11 @@ const tranTxt = {
         'Volume': '音量',
         'Live': '直播',
         'Video info': '视频统计信息',
+        'Rain broadcast': '降雨放送',
+        'TLV layer switch failed': 'TLV 层切换失败',
+        'Select the quality again to retry.': '请再次选择该画质重试。',
+        'Switched to rain broadcast because the broadcast stream was damaged.': '检测到广播流损坏，已切换到降雨放送。',
+        'Returned to the primary broadcast.': '已返回主放送。',
     },
     'zh-tw': {
         'Danmaku is loading': '彈幕載入中',
@@ -130,6 +135,11 @@ const tranTxt = {
         'Volume': '音量',
         'Live': '直播',
         'Video info': '影片統計訊息',
+        'Rain broadcast': '降雨放送',
+        'TLV layer switch failed': 'TLV 層切換失敗',
+        'Select the quality again to retry.': '請再次選擇該畫質重試。',
+        'Switched to rain broadcast because the broadcast stream was damaged.': '偵測到廣播串流損壞，已切換到降雨放送。',
+        'Returned to the primary broadcast.': '已返回主要放送。',
     },
     'ja-jp': {
         'Danmaku is loading': 'コメントを読み込み中…',
@@ -182,6 +192,11 @@ const tranTxt = {
         'Volume': '音量',
         'Live': 'Live',
         'Video info': '動画の統計情報',
+        'Rain broadcast': '降雨放送',
+        'TLV layer switch failed': 'TLV レイヤーの切り替えに失敗しました',
+        'Select the quality again to retry.': 'もう一度画質を選択して再試行してください。',
+        'Switched to rain broadcast because the broadcast stream was damaged.': '受信した放送ストリームが不連続なため、降雨放送に切り替えました。',
+        'Returned to the primary broadcast.': '通常放送に戻りました。',
     },
 };
 
