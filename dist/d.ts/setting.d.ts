@@ -7,6 +7,7 @@ declare class Setting {
     unlimitDanmaku: boolean;
     currentAudio: 'primary' | 'secondary';
     toneMappingMode: DPlayerType.ToneMappingMode;
+    toneMappingModeBeforeComparison: DPlayerType.ToneMappingMode;
     resizeObserver: ResizeObserver;
     constructor(player: DPlayer);
     private updateToneMappingMode;

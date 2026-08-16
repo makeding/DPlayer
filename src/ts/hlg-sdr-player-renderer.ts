@@ -1,6 +1,5 @@
 import type createTlvDemuxModule from 'tlvdemux';
-
-import {HlgSdrRenderer} from './hlg-sdr-renderer.mjs';
+import {HlgSdrRenderer} from 'tlvdemux/hlg-sdr-renderer';
 
 export default class HlgSdrPlayerRenderer {
     private readonly webGpuCanvas = document.createElement('canvas');
@@ -36,6 +35,10 @@ export default class HlgSdrPlayerRenderer {
 
     setColorLut(lut: createTlvDemuxModule.HlgSdrColorLut): void {
         this.renderer.setColorLut(lut);
+    }
+
+    setComparisonEnabled(enabled: boolean): void {
+        this.renderer.setComparisonEnabled(enabled);
     }
 
     setEnabled(enabled: boolean): void {

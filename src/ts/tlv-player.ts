@@ -968,6 +968,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const effectiveMode = this.effectiveToneMappingMode();
         const lut = effectiveMode === 'prototype' ? this.hlgSdrPrototypeColorLut : this.hlgSdrColorLut;
         if (lut) this.hlgSdrRenderer.setColorLut(lut);
+        this.hlgSdrRenderer.setComparisonEnabled(this.toneMappingMode === 'on_compare');
         const enabled = sourceIsHlg && effectiveMode !== 'off' &&
             (effectiveMode === 'force' || effectiveMode === 'prototype' ||
              this.videoProperties?.sdrInHlg === true);
@@ -975,7 +976,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     private effectiveToneMappingMode(): createTlvDemuxModule.MseToneMappingMode {
-        if (this.toneMappingMode !== 'auto') return this.toneMappingMode;
+        if (this.toneMappingMode === 'force' || this.toneMappingMode === 'on_compare') return 'prototype';
+        if (this.toneMappingMode === 'off') return 'off';
         const hdrOutput = matchMedia('(video-dynamic-range: high)').matches ||
             matchMedia('(dynamic-range: high)').matches;
         return hdrOutput ? 'off' : 'prototype';

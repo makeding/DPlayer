@@ -11,6 +11,7 @@ class Setting {
     unlimitDanmaku: boolean;
     currentAudio: 'primary' | 'secondary' = 'primary';
     toneMappingMode: DPlayerType.ToneMappingMode = 'auto';
+    toneMappingModeBeforeComparison: DPlayerType.ToneMappingMode = 'auto';
     resizeObserver: ResizeObserver;
 
     constructor(player: DPlayer) {
@@ -129,9 +130,22 @@ class Setting {
             this.toneMappingMode = savedToneMappingMode === 2 ? 'force' : savedToneMappingMode === 0 ? 'off' : 'auto';
             this.updateToneMappingMode();
             this.player.template.toneMappingButton.addEventListener('click', () => {
-                this.toneMappingMode = this.toneMappingMode === 'auto' ? 'force' :
-                    this.toneMappingMode === 'force' ? 'off' : 'auto';
+                const mode = this.toneMappingMode === 'on_compare' ?
+                    this.toneMappingModeBeforeComparison : this.toneMappingMode;
+                this.toneMappingMode = mode === 'auto' ? 'force' :
+                    mode === 'force' ? 'off' : 'auto';
                 this.player.user.set('toneMappingMode', this.toneMappingMode === 'force' ? 2 : this.toneMappingMode === 'off' ? 0 : 1);
+                this.updateToneMappingMode();
+            });
+            this.player.template.toneMappingButton.addEventListener('contextmenu', (event) => {
+                event.preventDefault();
+                event.stopPropagation();
+                if (this.toneMappingMode === 'on_compare') {
+                    this.toneMappingMode = this.toneMappingModeBeforeComparison;
+                } else {
+                    this.toneMappingModeBeforeComparison = this.toneMappingMode;
+                    this.toneMappingMode = 'on_compare';
+                }
                 this.updateToneMappingMode();
             });
         }
@@ -242,11 +256,14 @@ class Setting {
 
     private updateToneMappingMode(): void {
         this.player.setTLVToneMappingMode(this.toneMappingMode);
-        const label = this.toneMappingMode === 'force' ? 'ON' : this.toneMappingMode === 'off' ? 'OFF' : 'AUTO';
-        const description = this.toneMappingMode === 'force' ? '有効' : this.toneMappingMode === 'off' ? '無効' : '自動';
+        const label = this.toneMappingMode === 'on_compare' ? 'CMP' :
+            this.toneMappingMode === 'force' ? 'ON' : this.toneMappingMode === 'off' ? 'OFF' : 'AUTO';
+        const description = this.toneMappingMode === 'on_compare' ? '比較' :
+            this.toneMappingMode === 'force' ? '有効' : this.toneMappingMode === 'off' ? '無効' : '自動';
+        const comparisonHint = this.toneMappingMode === 'on_compare' ? '右クリックで戻る' : '右クリックで比較';
         this.player.template.toneMappingValue.textContent = label;
         this.player.template.toneMappingButton.classList.toggle('dplayer-tone-mapping-active', this.toneMappingMode !== 'off');
-        this.player.template.toneMappingButton.setAttribute('aria-label', `HDR → SDR 変換：${description}`);
+        this.player.template.toneMappingButton.setAttribute('aria-label', `HDR → SDR 変換：${description}（${comparisonHint}）`);
     }
 
     hide(): void {
