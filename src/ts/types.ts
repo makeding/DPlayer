@@ -71,6 +71,7 @@ export type PlayerEvents =
     'tlv_tracks' |
     'tlv_track_change' |
     'tlv_layer_change' |
+    'tlv_mpt_snapshot' |
     'tlv_caption_data' |
     'tlv_broadcast_clock' |
     'tlv_layout_configuration' |
@@ -389,6 +390,7 @@ export interface TLVOptions {
 }
 
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
+export type TLVMptSnapshot = createTlvDemuxModule.MptSnapshot;
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
 /** Layout configuration carried by an MMT LCT descriptor. */

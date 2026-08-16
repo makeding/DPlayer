@@ -665,6 +665,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 this.bridge.emit('tlv_tracks', [...this.tracks]);
                 this.configureAutomaticLayerSwitch();
             },
+            onMptSnapshot: snapshot => {
+                if (active()) this.bridge.emit('tlv_mpt_snapshot', snapshot);
+            },
             onAccessUnitView: unit => {
                 if (!active()) return;
                 try {

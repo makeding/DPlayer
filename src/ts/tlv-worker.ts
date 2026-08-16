@@ -117,6 +117,7 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
             automaticSelection(record, track);
             sendEvent(objectId, 'onTrack', track);
         },
+        onMptSnapshot: event('onMptSnapshot'),
         onBroadcastClock: event('onBroadcastClock'),
         onLayoutConfiguration: event('onLayoutConfiguration'),
         onServiceStateReset: event('onServiceStateReset'),
