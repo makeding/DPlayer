@@ -72,6 +72,8 @@ export type PlayerEvents =
     'tlv_track_change' |
     'tlv_layer_change' |
     'tlv_mpt_snapshot' |
+    'tlv_video_properties' |
+    'tlv_output_state' |
     'tlv_caption_data' |
     'tlv_broadcast_clock' |
     'tlv_layout_configuration' |
@@ -391,6 +393,24 @@ export interface TLVOptions {
 
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVMptSnapshot = createTlvDemuxModule.MptSnapshot;
+export type TLVVideoProperties = createTlvDemuxModule.MseVideoProperties;
+export interface TLVOutputState {
+    generation: bigint;
+    connected: boolean;
+    hdrMode: number;
+    edidValid: boolean;
+    hdrSupport: boolean;
+    pqEotf: boolean;
+    hlgEotf: boolean;
+    bt2020: boolean;
+    supports4k50_60: boolean;
+    colorSpaceMask: number;
+    maxDeepColorBits: number;
+    maxTmdsClockMhz: number;
+    dolbyTunnelSupported: boolean;
+    dolbyMetadataPassthrough: boolean;
+    dolbyObservedProfile: number | null;
+}
 export type TLVEventInfo = createTlvDemuxModule.EventInfo;
 export type TLVStreamEvent = createTlvDemuxModule.StreamEvent;
 /** Layout configuration carried by an MMT LCT descriptor. */
@@ -449,6 +469,10 @@ export interface TLVPlugin {
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
+    /** Inject host-provided display EDID; browsers cannot read HDMI EDID directly. */
+    setOutputEdid(edid: Uint8Array): void;
+    /** Notify the demuxer about the host display connection state. */
+    setOutputConnected(connected: boolean): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
     /** Latest media-to-broadcast-clock mapping, including one discovered before listeners attached. */

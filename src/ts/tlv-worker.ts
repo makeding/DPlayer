@@ -1,4 +1,5 @@
 import createTlvDemuxModule from 'tlvdemux';
+import type {TLVOutputState} from './types';
 
 const scope = globalThis as unknown as {
     postMessage: (message: unknown, transfer?: Transferable[]) => void;
@@ -104,10 +105,12 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
     const event = (name: string) => (value?: unknown): void => sendEvent(objectId, name, value);
     const callbacks: createTlvDemuxModule.TlvDemuxOptions & {
         onViewerParticipationNotification?: (notification: ViewerParticipationNotification) => void;
+        onMseOutputState?: (state: TLVOutputState) => void;
     } = {
         mseMaxAudioChannels: record.selection.maxAudioChannels,
         onMseVideoStart: event('onMseVideoStart'),
         onMseVideoProperties: event('onMseVideoProperties'),
+        onMseOutputState: event('onMseOutputState'),
         onMseVideoSplice: event('onMseVideoSplice'),
         onMseAudioSplice: event('onMseAudioSplice'),
         onMseLayerSwitch: event('onMseLayerSwitch'),

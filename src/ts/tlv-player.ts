@@ -170,6 +170,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private toneMappingMode: createTlvDemuxModule.MseToneMappingMode = 'auto';
     private hlgSdrColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
     private hlgSdrPrototypeColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
+    private outputState: DPlayerType.TLVOutputState | null = null;
+    private pendingOutputEdid: Uint8Array | null = null;
+    private pendingOutputConnected: boolean | null = null;
     private videoProperties: createTlvDemuxModule.MseVideoProperties | null = null;
 
     constructor(bridge: PlayerBridge) {
@@ -336,6 +339,24 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         void demuxer.setMseToneMappingMode(effectiveMode).then(() => {
             if (this.demuxer === demuxer && !this.destroyed) this.updateHlgSdrRenderer();
         }).catch(error => {
+            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
+        });
+    }
+
+    setOutputEdid(edid: Uint8Array): void {
+        this.pendingOutputEdid = edid.slice();
+        const demuxer = this.demuxer;
+        if (!demuxer) return;
+        void demuxer.setMseEdid(this.pendingOutputEdid).catch(error => {
+            if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
+        });
+    }
+
+    setOutputConnected(connected: boolean): void {
+        this.pendingOutputConnected = connected;
+        const demuxer = this.demuxer;
+        if (!demuxer) return;
+        void demuxer.setMseOutputConnected(connected).catch(error => {
             if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
         });
     }
@@ -544,6 +565,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 if (!active()) return;
                 this.videoProperties = properties;
                 this.updateHlgSdrRenderer();
+                this.bridge.emit('tlv_video_properties', properties);
+            },
+            onMseOutputState: state => {
+                if (!active()) return;
+                this.outputState = state;
+                this.updateHlgSdrRenderer();
+                this.bridge.emit('tlv_output_state', state);
             },
             onMseInit: init => {
                 if (!active()) return;
@@ -773,6 +801,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.demuxer = demuxer;
         await demuxer.initialized();
+        // Apply host display state before the first media initialization is
+        // emitted, so Auto can preserve HDR signalling for a real HDR sink.
+        if (this.pendingOutputEdid) await demuxer.setMseEdid(this.pendingOutputEdid.slice());
+        if (this.pendingOutputConnected !== null) {
+            await demuxer.setMseOutputConnected(this.pendingOutputConnected);
+        }
         [this.hlgSdrColorLut, this.hlgSdrPrototypeColorLut] = await Promise.all([
             demuxer.hlgSdrColorLut(), demuxer.hlgSdrPrototypeColorLut(),
         ]);
@@ -962,6 +996,19 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private effectiveToneMappingMode(): createTlvDemuxModule.MseToneMappingMode {
         if (this.toneMappingMode === 'force' || this.toneMappingMode === 'on_compare') return 'prototype';
         if (this.toneMappingMode === 'off') return 'off';
+        const sourceTransfer = this.videoProperties?.sourceColor?.transfer;
+        if (sourceTransfer !== undefined && this.outputState?.connected &&
+            this.outputState.edidValid) {
+            // A host-injected EDID is stronger evidence than the browser's
+            // generic dynamic-range media query. Preserve the coded HDR
+            // signalling when the sink can consume that transfer function.
+            const sinkSupportsSource = sourceTransfer === 18
+                ? this.outputState.hlgEotf
+                : sourceTransfer === 16
+                    ? this.outputState.pqEotf
+                    : false;
+            return sinkSupportsSource ? 'off' : 'prototype';
+        }
         const hdrOutput = matchMedia('(video-dynamic-range: high)').matches ||
             matchMedia('(dynamic-range: high)').matches;
         return hdrOutput ? 'off' : 'prototype';

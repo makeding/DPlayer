@@ -1,5 +1,6 @@
 import type createTlvDemuxModule from 'tlvdemux';
 import InlineTlvWorker from 'worker-loader?inline=no-fallback!./tlv-worker';
+import type {TLVOutputState} from './types';
 
 type ViewerParticipationNotification = {
     contextId: number;
@@ -15,6 +16,7 @@ type ViewerParticipationNotification = {
 };
 type Callbacks = createTlvDemuxModule.TlvDemuxOptions & {
     onViewerParticipationNotification?: (notification: ViewerParticipationNotification) => void;
+    onMseOutputState?: (state: TLVOutputState) => void;
 };
 type TrackKind = createTlvDemuxModule.TrackKind;
 
@@ -271,6 +273,14 @@ export class WorkerDemuxer extends WorkerObject {
     }
     setMseToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): Promise<void> {
         return this.call('setMseToneMappingMode', [mode]);
+    }
+    setMseEdid(edid: Uint8Array): Promise<void> {
+        const data = edid.byteOffset === 0 && edid.byteLength === edid.buffer.byteLength
+            ? edid : edid.slice();
+        return this.call('setMseEdid', [data], [data.buffer as ArrayBuffer]);
+    }
+    setMseOutputConnected(connected: boolean): Promise<void> {
+        return this.call('setMseOutputConnected', [connected]);
     }
     hlgSdrColorLut(): Promise<createTlvDemuxModule.HlgSdrColorLut> { return this.call('hlgSdrColorLut'); }
     hlgSdrPrototypeColorLut(): Promise<createTlvDemuxModule.HlgSdrColorLut> {

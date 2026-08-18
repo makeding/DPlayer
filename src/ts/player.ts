@@ -63,6 +63,8 @@ class DPlayer {
     quality: DPlayerType.VideoQualityInternal | null = null;
     qualityIndex: number | null = null;
     switchingQuality = false;
+    private tlvOutputEdid: Uint8Array | null = null;
+    private tlvOutputConnected: boolean | null = null;
     resizeObserver: ResizeObserver;
     tran: (text: string) => string;
     type: DPlayerType.VideoType | string = 'auto';
@@ -453,6 +455,16 @@ class DPlayer {
 
     setTLVToneMappingMode(mode: DPlayerType.ToneMappingMode): void {
         this.plugins.tlv?.setToneMappingMode(mode);
+    }
+
+    setTLVOutputEdid(edid: Uint8Array): void {
+        this.tlvOutputEdid = edid.slice();
+        this.plugins.tlv?.setOutputEdid(this.tlvOutputEdid);
+    }
+
+    setTLVOutputConnected(connected: boolean): void {
+        this.tlvOutputConnected = connected;
+        this.plugins.tlv?.setOutputConnected(connected);
     }
 
     private setAudioSwitchingAvailable(available: boolean): void {
@@ -887,6 +899,10 @@ class DPlayer {
                         notice: message => this.notice(`Error: ${message}`, undefined, undefined, '#FF6F6A'),
                     });
                     this.plugins.tlv = tlvPlayer;
+                    if (this.tlvOutputEdid) tlvPlayer.setOutputEdid(this.tlvOutputEdid);
+                    if (this.tlvOutputConnected !== null) {
+                        tlvPlayer.setOutputConnected(this.tlvOutputConnected);
+                    }
                     this.events.on('destroy', () => {
                         if (this.plugins.tlv === tlvPlayer) {
                             tlvPlayer.destroy();

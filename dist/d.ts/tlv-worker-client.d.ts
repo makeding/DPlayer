@@ -1,4 +1,5 @@
 import type createTlvDemuxModule from 'tlvdemux';
+import type { TLVOutputState } from './types';
 type ViewerParticipationNotification = {
     contextId: number;
     sourcePacketId: number;
@@ -13,6 +14,7 @@ type ViewerParticipationNotification = {
 };
 type Callbacks = createTlvDemuxModule.TlvDemuxOptions & {
     onViewerParticipationNotification?: (notification: ViewerParticipationNotification) => void;
+    onMseOutputState?: (state: TLVOutputState) => void;
 };
 type TrackKind = createTlvDemuxModule.TrackKind;
 type SelectionOptions = {
@@ -84,6 +86,8 @@ export declare class WorkerDemuxer extends WorkerObject {
     setMseOutputEnabled(enabled: boolean): Promise<void>;
     setSubtitlePassthroughEnabled(enabled: boolean): Promise<void>;
     setMseToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): Promise<void>;
+    setMseEdid(edid: Uint8Array): Promise<void>;
+    setMseOutputConnected(connected: boolean): Promise<void>;
     hlgSdrColorLut(): Promise<createTlvDemuxModule.HlgSdrColorLut>;
     hlgSdrPrototypeColorLut(): Promise<createTlvDemuxModule.HlgSdrColorLut>;
     startIndex(growing: boolean): Promise<void>;

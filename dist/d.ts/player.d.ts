@@ -46,6 +46,8 @@ declare class DPlayer {
     quality: DPlayerType.VideoQualityInternal | null;
     qualityIndex: number | null;
     switchingQuality: boolean;
+    private tlvOutputEdid;
+    private tlvOutputConnected;
     resizeObserver: ResizeObserver;
     tran: (text: string) => string;
     type: DPlayerType.VideoType | string;
@@ -102,6 +104,8 @@ declare class DPlayer {
     selectTLVLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectTLVSubtitleTrack(packetId: number): void;
     setTLVToneMappingMode(mode: DPlayerType.ToneMappingMode): void;
+    setTLVOutputEdid(edid: Uint8Array): void;
+    setTLVOutputConnected(connected: boolean): void;
     private setAudioSwitchingAvailable;
     /**
      * Switch to a new video

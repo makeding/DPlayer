@@ -65,6 +65,8 @@ class Events {
             'tlv_track_change',
             'tlv_layer_change',
             'tlv_mpt_snapshot',
+            'tlv_video_properties',
+            'tlv_output_state',
             'tlv_caption_data',
             'tlv_broadcast_clock',
             'tlv_layout_configuration',

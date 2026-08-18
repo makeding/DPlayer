@@ -47,6 +47,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private toneMappingMode;
     private hlgSdrColorLut;
     private hlgSdrPrototypeColorLut;
+    private outputState;
+    private pendingOutputEdid;
+    private pendingOutputConnected;
     private videoProperties;
     constructor(bridge: PlayerBridge);
     layerPair(tracks?: readonly DPlayerType.TLVTrackInfo[]): DPlayerType.TLVLayerPair | null;
@@ -56,6 +59,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
+    setOutputEdid(edid: Uint8Array): void;
+    setOutputConnected(connected: boolean): void;
     applicationEntry(contextId: number): string | null;
     applications(): createTlvDemuxModule.ApplicationState[];
     broadcastClock(): createTlvDemuxModule.BroadcastClock | null;
