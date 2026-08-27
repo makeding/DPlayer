@@ -102,6 +102,7 @@ declare class DPlayer {
     selectTLVVideoTrack(packetId: number): void;
     selectTLVAudioTrack(packetId: number): Promise<void>;
     selectTLVLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
+    selectTLVAutomaticLayer(): Promise<void>;
     selectTLVSubtitleTrack(packetId: number): void;
     setTLVToneMappingMode(mode: DPlayerType.ToneMappingMode): void;
     setTLVOutputEdid(edid: Uint8Array): void;

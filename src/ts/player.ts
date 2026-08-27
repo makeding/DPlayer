@@ -80,7 +80,11 @@ class DPlayer {
         this.options = handleOption({ preload: options.video.type === 'webtorrent' ? 'none' : 'metadata', ...options });
         // @ts-expect-error TS(7009): 'new' expression, whose target lacks a construct s... Remove this comment to see the full error message
         this.tran = new i18n(this.options.lang).tran;
-        installDynamicTLVQualities(this.options, this.tran('Rain broadcast'));
+        installDynamicTLVQualities(this.options, {
+            original: this.tran('original'),
+            preferred: this.tran('Normal broadcast'),
+            fallback: this.tran('Rain broadcast'),
+        });
         if (this.options.video.quality) {
             this.qualityIndex = this.options.video.defaultQuality!;
             this.quality = this.options.video.quality[this.options.video.defaultQuality!];
@@ -447,6 +451,10 @@ class DPlayer {
 
     selectTLVLayer(videoPacketId: number, audioPacketId: number): Promise<void> {
         return this.plugins.tlv?.selectLayer(videoPacketId, audioPacketId) ?? Promise.resolve();
+    }
+
+    selectTLVAutomaticLayer(): Promise<void> {
+        return this.plugins.tlv?.selectAutomaticLayer() ?? Promise.resolve();
     }
 
     selectTLVSubtitleTrack(packetId: number): void {
@@ -877,6 +885,9 @@ class DPlayer {
                         subtitleOptions: this.options.pluginOptions.aribb62,
                         subtitleVisible: () => this.user.get('subtitle') !== 0 &&
                             !this.template.subtitle.classList.contains('dplayer-subtitle-hide'),
+                        damageNotice: this.template.tlvPlaybackDamage,
+                        translate: this.tran,
+                        invalidateQualitySnapshot: () => this.tlvQuality?.invalidateSnapshot(),
                         emit: (name, detail) => {
                             if (name === 'tlv_tracks') {
                                 const choices = new Set<string>();
@@ -888,6 +899,7 @@ class DPlayer {
                                     }
                                 }
                                 this.setAudioSwitchingAvailable(choices.size >= 2);
+                                this.tlvQuality?.tracksChanged();
                             }
                             if (name === 'tlv_mpt_snapshot') {
                                 this.tlvQuality?.sync(detail as DPlayerType.TLVMptSnapshot);

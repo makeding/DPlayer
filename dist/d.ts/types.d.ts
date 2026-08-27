@@ -14,7 +14,7 @@ export type VideoType = 'auto' | 'hls' | 'mpegts' | 'tlv' | 'flv' | 'dash' | 'we
 export type SubtitleType = 'webvtt' | 'aribb24' | 'aribb62';
 export type Events = VideoEvents | PlayerEvents;
 export type VideoEvents = 'abort' | 'canplay' | 'canplaythrough' | 'durationchange' | 'emptied' | 'ended' | 'error' | 'loadeddata' | 'loadedmetadata' | 'loadstart' | 'mozaudioavailable' | 'pause' | 'play' | 'playing' | 'progress' | 'ratechange' | 'seeked' | 'seeking' | 'stalled' | 'suspend' | 'timeupdate' | 'volumechange' | 'waiting';
-export type PlayerEvents = 'screenshot' | 'thumbnails_show' | 'thumbnails_hide' | 'danmaku_show' | 'danmaku_hide' | 'danmaku_clear' | 'danmaku_load_start' | 'danmaku_load_end' | 'danmaku_send' | 'danmaku_opacity' | 'contextmenu_show' | 'contextmenu_hide' | 'notice_show' | 'notice_hide' | 'quality_start' | 'quality_end' | 'destroy' | 'resize' | 'fullscreen' | 'fullscreen_cancel' | 'webfullscreen' | 'webfullscreen_cancel' | 'subtitle_show' | 'subtitle_hide' | 'subtitle_change' | 'tlv_ready' | 'tlv_error' | 'tlv_tracks' | 'tlv_track_change' | 'tlv_layer_change' | 'tlv_mpt_snapshot' | 'tlv_video_properties' | 'tlv_output_state' | 'tlv_caption_data' | 'tlv_broadcast_clock' | 'tlv_layout_configuration' | 'tlv_event_info' | 'tlv_stream_event' | 'tlv_viewer_participation' | 'tlv_application_state' | 'tlv_application_resource' | 'tlv_application_resources_reset';
+export type PlayerEvents = 'screenshot' | 'thumbnails_show' | 'thumbnails_hide' | 'danmaku_show' | 'danmaku_hide' | 'danmaku_clear' | 'danmaku_load_start' | 'danmaku_load_end' | 'danmaku_send' | 'danmaku_opacity' | 'contextmenu_show' | 'contextmenu_hide' | 'notice_show' | 'notice_hide' | 'quality_start' | 'quality_end' | 'destroy' | 'resize' | 'fullscreen' | 'fullscreen_cancel' | 'webfullscreen' | 'webfullscreen_cancel' | 'subtitle_show' | 'subtitle_hide' | 'subtitle_change' | 'tlv_ready' | 'tlv_error' | 'tlv_playback_damage' | 'tlv_tracks' | 'tlv_track_change' | 'tlv_layer_change' | 'tlv_mpt_snapshot' | 'tlv_video_properties' | 'tlv_output_state' | 'tlv_caption_data' | 'tlv_broadcast_clock' | 'tlv_layout_configuration' | 'tlv_event_info' | 'tlv_stream_event' | 'tlv_viewer_participation' | 'tlv_application_state' | 'tlv_application_resource' | 'tlv_application_resources_reset';
 export type DanmakuType = 'top' | 'right' | 'bottom';
 export type DanmakuSize = 'big' | 'medium' | 'small';
 export type FullscreenType = 'browser' | 'web';
@@ -279,6 +279,7 @@ export interface TLVOptions {
     backBufferSeconds?: number;
 }
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
+export type TLVPlaybackDamage = createTlvDemuxModule.PlaybackDamage;
 export type TLVMptSnapshot = createTlvDemuxModule.MptSnapshot;
 export type TLVVideoProperties = createTlvDemuxModule.MseVideoProperties;
 export interface TLVOutputState {
@@ -354,6 +355,7 @@ export interface TLVPlugin {
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
+    selectAutomaticLayer(): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
     /** Inject host-provided display EDID; browsers cannot read HDMI EDID directly. */
@@ -537,7 +539,7 @@ export interface VideoQualityInternal {
     type: VideoType | string;
     tlv?: TLVSourceOptions;
     tlvDynamicLayer?: {
-        role: 'preferred' | 'fallback';
+        role: 'original' | 'preferred' | 'fallback';
         sourceIndex: number;
         videoPacketId?: number;
         audioPacketId?: number;

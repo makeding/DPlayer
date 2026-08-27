@@ -21,6 +21,7 @@ class Template {
     playedBarTime!: HTMLElement;
     danmaku!: HTMLElement;
     danmakuLoading!: HTMLElement;
+    tlvPlaybackDamage!: HTMLElement;
     video!: HTMLVideoElement;
     bezel!: HTMLElement;
     playButton!: HTMLElement;
@@ -139,6 +140,7 @@ class Template {
         this.playedBarTime = this.container.querySelector('.dplayer-bar-time')!;
         this.danmaku = this.container.querySelector('.dplayer-danmaku')!;
         this.danmakuLoading = this.container.querySelector('.dplayer-danloading')!;
+        this.tlvPlaybackDamage = this.container.querySelector('.dplayer-tlv-playback-damage')!;
         this.video = this.container.querySelector<HTMLVideoElement>('.dplayer-video-current')!;
         this.bezel = this.container.querySelector('.dplayer-bezel-icon')!;
         this.playButton = this.container.querySelector('.dplayer-play-icon')!;

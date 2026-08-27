@@ -10,6 +10,36 @@ export interface TLVLayerPair {
     fallback: TLVLayer | null;
 }
 
+export function availableMptTracks(
+    snapshotTracks: readonly DPlayerType.TLVTrackInfo[],
+    selectableTracks: readonly DPlayerType.TLVTrackInfo[],
+): DPlayerType.TLVTrackInfo[] {
+    return snapshotTracks.filter(snapshotTrack => selectableTracks.some(selectable =>
+        selectable.kind === snapshotTrack.kind && selectable.trackId === snapshotTrack.trackId));
+}
+
+export async function selectManualTLVLayer(
+    disableAutomatic: () => Promise<void>,
+    switchLayer: () => Promise<void>,
+    restoreAutomatic?: () => Promise<void>,
+): Promise<void> {
+    await disableAutomatic();
+    try {
+        await switchLayer();
+    } catch (error) {
+        if (restoreAutomatic) {
+            try {
+                await restoreAutomatic();
+            } catch (restoreError) {
+                const switchMessage = error instanceof Error ? error.message : String(error);
+                const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError);
+                throw new Error(`${switchMessage} Automatic mode rollback failed: ${restoreMessage}`);
+            }
+        }
+        throw error;
+    }
+}
+
 export function selectionLevel(
     track: DPlayerType.TLVTrackInfo,
     groupIdentification: number | null = null,

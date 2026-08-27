@@ -61,6 +61,7 @@ class Events {
             'subtitle_change',
             'tlv_ready',
             'tlv_error',
+            'tlv_playback_damage',
             'tlv_tracks',
             'tlv_track_change',
             'tlv_layer_change',

@@ -68,6 +68,7 @@ export type PlayerEvents =
     'subtitle_change' |
     'tlv_ready' |
     'tlv_error' |
+    'tlv_playback_damage' |
     'tlv_tracks' |
     'tlv_track_change' |
     'tlv_layer_change' |
@@ -392,6 +393,7 @@ export interface TLVOptions {
 }
 
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
+export type TLVPlaybackDamage = createTlvDemuxModule.PlaybackDamage;
 export type TLVMptSnapshot = createTlvDemuxModule.MptSnapshot;
 export type TLVVideoProperties = createTlvDemuxModule.MseVideoProperties;
 export interface TLVOutputState {
@@ -467,6 +469,7 @@ export interface TLVPlugin {
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
+    selectAutomaticLayer(): Promise<void>;
     selectSubtitleTrack(packetId: number): void;
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
     /** Inject host-provided display EDID; browsers cannot read HDMI EDID directly. */
@@ -667,7 +670,7 @@ export interface VideoQualityInternal {
     type: VideoType | string;
     tlv?: TLVSourceOptions;
     tlvDynamicLayer?: {
-        role: 'preferred' | 'fallback';
+        role: 'original' | 'preferred' | 'fallback';
         sourceIndex: number;
         videoPacketId?: number;
         audioPacketId?: number;

@@ -1,6 +1,7 @@
 import DPlayer from './player';
 import utils from './utils';
 import * as DPlayerType from './types';
+import {visibleQualityCount} from './quality-visibility';
 
 declare let window: DPlayerType.WindowExtend;
 
@@ -276,7 +277,7 @@ class Setting {
     }
 
     private syncQualityPanelHeight(): void {
-        const visibleItems = Array.from(this.player.template.qualityItem).filter(item => !item.hidden).length;
+        const visibleItems = visibleQualityCount(this.player.template.qualityItem);
         this.player.template.settingBox.style.setProperty('--quality-length', String(visibleItems));
     }
 

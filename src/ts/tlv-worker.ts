@@ -114,6 +114,7 @@ async function createDemuxer(objectId: number, options: Record<string, any>): Pr
         onMseVideoSplice: event('onMseVideoSplice'),
         onMseAudioSplice: event('onMseAudioSplice'),
         onMseLayerSwitch: event('onMseLayerSwitch'),
+        onPlaybackDamage: event('onPlaybackDamage'),
         onMseInit(init) { sendEvent(objectId, 'onMseInit', init, [init.data.buffer]); },
         onMseSegment(segment) { sendEvent(objectId, 'onMseSegment', segment, [segment.data.buffer]); },
         onTrack(track) {

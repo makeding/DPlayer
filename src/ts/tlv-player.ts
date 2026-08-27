@@ -4,7 +4,8 @@ import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue'
 
 import type * as DPlayerType from './types';
 import HlgSdrRenderer from './hlg-sdr-player-renderer';
-import {resolveTLVLayerPair} from './tlv-layer-selection';
+import {availableMptTracks, resolveTLVLayerPair, selectManualTLVLayer} from './tlv-layer-selection';
+import {createTlvPlaybackDamageRecovery} from './tlv-playback-damage.mjs';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
 const MiB = 1024n * 1024n;
@@ -102,6 +103,9 @@ type PlayerBridge = {
     options: DPlayerType.TLVOptions;
     subtitleOptions?: aribb62js.B62TTMLRendererOptions;
     subtitleVisible: () => boolean;
+    damageNotice: HTMLElement;
+    translate: (text: string) => string;
+    invalidateQualitySnapshot: () => void;
     emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
     notice: (message: string) => void;
 };
@@ -167,6 +171,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchError: Error | null = null;
     private layerSwitchPending: LayerSwitchRequest | null = null;
     private automaticLayerPairSignature: string | null = null;
+    private currentMptSnapshot: DPlayerType.TLVMptSnapshot | null = null;
     private toneMappingMode: createTlvDemuxModule.MseToneMappingMode = 'auto';
     private hlgSdrColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
     private hlgSdrPrototypeColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
@@ -174,21 +179,41 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private pendingOutputEdid: Uint8Array | null = null;
     private pendingOutputConnected: boolean | null = null;
     private videoProperties: createTlvDemuxModule.MseVideoProperties | null = null;
+    private readonly damageRecovery;
+    private readonly reportedDamage = new Set<string>();
+    private readonly waitingListener = (): void => { this.damageRecovery.notifyWaiting(); };
+    private readonly playingListener = (): void => {
+        if (this.bridge.damageNotice.dataset.state === 'recovered') this.clearDamageNotice();
+    };
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
         this.preferredVideoPacketId = bridge.source.videoPacketId ?? null;
         this.hlgSdrRenderer = new HlgSdrRenderer(bridge.video, bridge.mediaPlane);
+        this.damageRecovery = createTlvPlaybackDamageRecovery({
+            media: bridge.video,
+            queues: () => this.queueByType,
+            seek: target => { bridge.video.currentTime = target; },
+            onRecovered: () => {
+                this.showDamageNotice('recovered', bridge.translate(
+                    'Playback recovered. [TLV_SOURCE_DAMAGE]',
+                ));
+            },
+        });
+        bridge.video.addEventListener('waiting', this.waitingListener);
+        bridge.video.addEventListener('playing', this.playingListener);
         void this.initialize();
     }
 
-    layerPair(tracks: readonly DPlayerType.TLVTrackInfo[] = this.tracks): DPlayerType.TLVLayerPair | null {
+    layerPair(
+        tracks: readonly DPlayerType.TLVTrackInfo[] = this.currentMptSnapshot?.tracks ?? [],
+    ): DPlayerType.TLVLayerPair | null {
         const currentVideo = this.tracks.find(track =>
             track.kind === 'video' && track.trackId === this.selectedTrackIds.get('video'));
         const currentAudio = this.tracks.find(track =>
             track.kind === 'audio' && track.trackId === this.selectedTrackIds.get('audio'));
         if (!currentVideo || !currentAudio) return null;
-        return resolveTLVLayerPair(tracks, currentVideo, currentAudio);
+        return resolveTLVLayerPair(availableMptTracks(tracks, this.tracks), currentVideo, currentAudio);
     }
 
     async seek(time: number): Promise<void> {
@@ -210,6 +235,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const track = this.trackByPacket('video', packetId);
         if (!track || !this.demuxer) return;
         const demuxer = this.demuxer;
+        this.resetPlaybackDamage();
         this.selectedTrackIds.set('video', track.trackId);
         void demuxer.selectTrack('video', track.trackId).catch(error => {
             if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
@@ -265,16 +291,73 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!this.isMseCompatibleAudioTrack(audioTrack)) {
             throw new Error('22.2-channel audio is not supported by browser MSE; use the 5.1 or stereo track.');
         }
-        if (this.selectedTrackIds.get('video') === videoTrack.trackId) {
-            await this.selectAudioTrack(audioPacketId);
-            return;
-        }
         if (this.layerSwitchPending) throw new Error('Another A/V layer switch is still in progress.');
         if (this.audioSwitchPending) throw new Error('Another audio track switch is still in progress.');
         const demuxer = this.demuxer;
         if (!demuxer || !this.queueByType.has('video') || !this.queueByType.has('audio')) {
             throw new Error('A/V playback is not ready yet. Wait for playback to start and try again.');
         }
+
+        const wasAutomatic = this.preferredVideoPacketId === null;
+        await selectManualTLVLayer(
+            async () => {
+                await demuxer.clearAutomaticLayerSwitch();
+                this.automaticLayerPairSignature = 'disabled';
+            },
+            async () => {
+                if (this.selectedTrackIds.get('video') === videoTrack.trackId &&
+                    this.selectedTrackIds.get('audio') === audioTrack.trackId) return;
+                await this.switchLayer(demuxer, videoTrack, audioTrack);
+            },
+            wasAutomatic ? () => this.configureAutomaticLayerSwitch(true) : undefined,
+        );
+        this.preferredVideoPacketId = videoTrack.packetId;
+        this.preferredAudioPacketId = audioTrack.packetId;
+    }
+
+    async selectAutomaticLayer(): Promise<void> {
+        const demuxer = this.demuxer;
+        if (!demuxer) throw new Error('TLV playback is not ready yet.');
+        const previousVideoPacketId = this.preferredVideoPacketId;
+        const previousAudioPacketId = this.preferredAudioPacketId;
+        const previousVideo = previousVideoPacketId === null ? undefined :
+            this.trackByPacket('video', previousVideoPacketId);
+        const previousAudio = previousAudioPacketId === null ? undefined :
+            this.trackByPacket('audio', previousAudioPacketId);
+        const pair = this.layerPair();
+        try {
+            if (pair && (this.selectedTrackIds.get('video') !== pair.preferred.video.trackId ||
+                this.selectedTrackIds.get('audio') !== pair.preferred.audio.trackId)) {
+                await this.switchLayer(demuxer, pair.preferred.video, pair.preferred.audio);
+            }
+            this.preferredVideoPacketId = null;
+            this.preferredAudioPacketId = null;
+            await this.configureAutomaticLayerSwitch(true);
+        } catch (error) {
+            this.preferredVideoPacketId = previousVideoPacketId;
+            this.preferredAudioPacketId = previousAudioPacketId;
+            try {
+                await demuxer.clearAutomaticLayerSwitch();
+                this.automaticLayerPairSignature = 'disabled';
+                if (previousVideo && previousAudio &&
+                    (this.selectedTrackIds.get('video') !== previousVideo.trackId ||
+                     this.selectedTrackIds.get('audio') !== previousAudio.trackId)) {
+                    await this.switchLayer(demuxer, previousVideo, previousAudio);
+                }
+            } catch (restoreError) {
+                const message = error instanceof Error ? error.message : String(error);
+                const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError);
+                throw new Error(`${message} Manual mode rollback failed: ${restoreMessage}`);
+            }
+            throw error;
+        }
+    }
+
+    private async switchLayer(
+        demuxer: WorkerDemuxer,
+        videoTrack: DPlayerType.TLVTrackInfo,
+        audioTrack: DPlayerType.TLVTrackInfo,
+    ): Promise<void> {
 
         let resolveCompletion!: () => void;
         let rejectCompletion!: (error: Error) => void;
@@ -403,6 +486,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (this.destroyed) return;
         this.rejectLayerSwitch(new DOMException('TLV playback was destroyed.', 'AbortError'));
         this.destroyed = true;
+        this.bridge.video.removeEventListener('waiting', this.waitingListener);
+        this.bridge.video.removeEventListener('playing', this.playingListener);
+        this.resetPlaybackDamage();
         this.generation += 1;
         this.abortController?.abort();
         this.demuxer?.delete();
@@ -446,6 +532,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!this.workerReady || this.destroyed) return;
         this.rejectLayerSwitch(new DOMException('TLV playback was restarted.', 'AbortError'));
         const generation = ++this.generation;
+        this.resetPlaybackDamage();
         this.abortController?.abort();
         const controller = new AbortController();
         this.abortController = controller;
@@ -454,6 +541,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.releaseMediaSource();
         this.tracks.length = 0;
         this.selectedTrackIds.clear();
+        this.currentMptSnapshot = null;
+        this.automaticLayerPairSignature = null;
+        this.bridge.invalidateQualitySnapshot();
         this.videoProperties = null;
         this.updateHlgSdrRenderer();
         this.playingStarted = false;
@@ -525,7 +615,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     this.mediaSource,
                     this.bridge.video,
                     init.mime,
-                    () => this.maybeStartPlayback(),
+                    () => this.handleQueueUpdate(),
                     {
                         backBufferSeconds: this.bridge.options.backBufferSeconds ?? (this.bridge.live ? 45 : 8),
                         forwardBufferHighSeconds: this.bridge.options.forwardBufferSeconds ?? (this.bridge.live ? 8 : 15),
@@ -621,21 +711,25 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
             onMseLayerSwitch: layer => {
                 if (!active()) return;
+                this.resetPlaybackDamage();
                 const pending = this.layerSwitchPending;
-                if (!pending || pending.demuxer !== demuxer || pending.generation !== generation ||
-                    pending.videoTrack.trackId !== layer.videoTrackId ||
-                    pending.audioTrack.trackId !== layer.audioTrackId) return;
-                this.layerSwitchPending = null;
-                this.preferredVideoPacketId = pending.videoTrack.packetId;
-                this.preferredAudioPacketId = pending.audioTrack.packetId;
-                this.selectedTrackIds.set('video', pending.videoTrack.trackId);
-                this.selectedTrackIds.set('audio', pending.audioTrack.trackId);
-                pending.resolve();
-                this.bridge.emit('tlv_track_change', {kind: 'video', track: pending.videoTrack});
-                this.bridge.emit('tlv_track_change', {kind: 'audio', track: pending.audioTrack});
+                const matchesPending = pending?.demuxer === demuxer && pending.generation === generation &&
+                    pending.videoTrack.trackId === layer.videoTrackId &&
+                    pending.audioTrack.trackId === layer.audioTrackId;
+                const videoTrack = matchesPending ? pending.videoTrack :
+                    this.tracks.find(track => track.kind === 'video' && track.trackId === layer.videoTrackId);
+                const audioTrack = matchesPending ? pending.audioTrack :
+                    this.tracks.find(track => track.kind === 'audio' && track.trackId === layer.audioTrackId);
+                if (!videoTrack || !audioTrack) return;
+                if (matchesPending) this.layerSwitchPending = null;
+                this.selectedTrackIds.set('video', videoTrack.trackId);
+                this.selectedTrackIds.set('audio', audioTrack.trackId);
+                if (matchesPending) pending.resolve();
+                this.bridge.emit('tlv_track_change', {kind: 'video', track: videoTrack});
+                this.bridge.emit('tlv_track_change', {kind: 'audio', track: audioTrack});
                 this.bridge.emit('tlv_layer_change', {
-                    videoTrack: pending.videoTrack,
-                    audioTrack: pending.audioTrack,
+                    videoTrack,
+                    audioTrack,
                     videoPresentationTimeUs: layer.videoPresentationTimeUs,
                     audioPresentationTimeUs: layer.audioPresentationTimeUs,
                 } satisfies DPlayerType.TLVLayerChange);
@@ -672,10 +766,18 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     }
                 }
                 this.bridge.emit('tlv_tracks', [...this.tracks]);
-                this.configureAutomaticLayerSwitch();
+                void this.configureAutomaticLayerSwitch().catch(error => this.fail(error));
             },
             onMptSnapshot: snapshot => {
-                if (active()) this.bridge.emit('tlv_mpt_snapshot', snapshot);
+                if (!active()) return;
+                this.currentMptSnapshot = snapshot;
+                void this.configureAutomaticLayerSwitch().catch(error => this.fail(error));
+                this.bridge.emit('tlv_mpt_snapshot', snapshot);
+            },
+            onPlaybackDamage: damage => {
+                if (!active()) return;
+                this.bridge.emit('tlv_playback_damage', damage);
+                this.handlePlaybackDamage(damage);
             },
             onAccessUnitView: unit => {
                 if (!active()) return;
@@ -1032,6 +1134,53 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         void this.bridge.video.play().catch(() => undefined);
     }
 
+    private handleQueueUpdate(): void {
+        this.maybeStartPlayback();
+        this.damageRecovery.update();
+    }
+
+    private handlePlaybackDamage(damage: createTlvDemuxModule.PlaybackDamage): void {
+        const key = `${damage.videoTrackId}:${damage.startInputOffset}:${damage.endInputOffset}`;
+        if (this.reportedDamage.has(key)) return;
+        this.reportedDamage.add(key);
+        if (damage.severity !== 'severe') return;
+
+        if (damage.action === 'seek' && damage.recoveryTimeUs !== null) {
+            this.damageRecovery.reportDamage(damage);
+            const start = Number(damage.startTimeUs ?? damage.endTimeUs) / 1000000;
+            const recovery = Number(damage.recoveryTimeUs) / 1000000;
+            const seconds = Math.max(0, recovery - start).toFixed(1);
+            const message = this.bridge.translate(
+                'Recording damaged. If playback stops, it will skip ahead {{seconds}} seconds. [TLV_SOURCE_DAMAGE]',
+            )
+                .replace('{{seconds}}', seconds);
+            this.showDamageNotice('recoverable', message);
+        } else if (damage.action === 'wait-for-recovery') {
+            this.showDamageNotice(
+                this.bridge.live ? 'waiting' : 'terminal',
+                this.bridge.translate(this.bridge.live ?
+                    'Stream damaged. Waiting for recovery. [TLV_SOURCE_DAMAGE]' :
+                    'Recording tail damaged. Cannot continue; return to an earlier position. [TLV_SOURCE_DAMAGE]'),
+            );
+        }
+    }
+
+    private showDamageNotice(state: 'recoverable' | 'waiting' | 'terminal' | 'recovered', message: string): void {
+        this.bridge.damageNotice.dataset.state = state;
+        this.bridge.damageNotice.textContent = message;
+    }
+
+    private clearDamageNotice(): void {
+        this.bridge.damageNotice.dataset.state = 'empty';
+        this.bridge.damageNotice.textContent = '';
+    }
+
+    private resetPlaybackDamage(): void {
+        this.damageRecovery.clear();
+        this.reportedDamage.clear();
+        this.clearDamageNotice();
+    }
+
     private async applyBackpressure(): Promise<void> {
         const backBuffer = this.bridge.options.backBufferSeconds ?? (this.bridge.live ? 45 : 8);
         for (const queue of this.queues) queue.trimBefore(this.bridge.video.currentTime - backBuffer);
@@ -1058,30 +1207,36 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         return track.audio?.channelLayout !== 14;
     }
 
-    private configureAutomaticLayerSwitch(): void {
+    private async configureAutomaticLayerSwitch(force = false): Promise<void> {
         const demuxer = this.demuxer;
         if (!demuxer) return;
         if (this.preferredVideoPacketId !== null) {
-            if (this.automaticLayerPairSignature !== 'disabled') {
+            if (force || this.automaticLayerPairSignature !== 'disabled') {
+                await demuxer.clearAutomaticLayerSwitch();
                 this.automaticLayerPairSignature = 'disabled';
-                void demuxer.clearAutomaticLayerSwitch();
             }
             return;
         }
         const pair = this.layerPair();
-        if (!pair?.fallback) return;
+        if (!pair?.fallback) {
+            if (force || this.automaticLayerPairSignature !== 'unavailable') {
+                await demuxer.clearAutomaticLayerSwitch();
+                this.automaticLayerPairSignature = 'unavailable';
+            }
+            return;
+        }
         const signature = [
             pair.preferred.video.trackId,
             pair.preferred.audio.trackId,
             pair.fallback.video.trackId,
             pair.fallback.audio.trackId,
         ].join(':');
-        if (signature === this.automaticLayerPairSignature) return;
-        this.automaticLayerPairSignature = signature;
-        void demuxer.configureAutomaticLayerSwitch(
+        if (!force && signature === this.automaticLayerPairSignature) return;
+        await demuxer.configureAutomaticLayerSwitch(
             pair.preferred.video.trackId, pair.preferred.audio.trackId,
             pair.fallback.video.trackId, pair.fallback.audio.trackId,
         );
+        this.automaticLayerPairSignature = signature;
     }
 
     private subtitleTrackKind(track: DPlayerType.TLVTrackInfo): 'caption' | 'superimpose' {

@@ -10,6 +10,9 @@ type PlayerBridge = {
     options: DPlayerType.TLVOptions;
     subtitleOptions?: aribb62js.B62TTMLRendererOptions;
     subtitleVisible: () => boolean;
+    damageNotice: HTMLElement;
+    translate: (text: string) => string;
+    invalidateQualitySnapshot: () => void;
     emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
     notice: (message: string) => void;
 };
@@ -44,6 +47,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchError;
     private layerSwitchPending;
     private automaticLayerPairSignature;
+    private currentMptSnapshot;
     private toneMappingMode;
     private hlgSdrColorLut;
     private hlgSdrPrototypeColorLut;
@@ -51,12 +55,18 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private pendingOutputEdid;
     private pendingOutputConnected;
     private videoProperties;
+    private readonly damageRecovery;
+    private readonly reportedDamage;
+    private readonly waitingListener;
+    private readonly playingListener;
     constructor(bridge: PlayerBridge);
     layerPair(tracks?: readonly DPlayerType.TLVTrackInfo[]): DPlayerType.TLVLayerPair | null;
     seek(time: number): Promise<void>;
     selectVideoTrack(packetId: number): void;
     selectAudioTrack(packetId: number): Promise<void>;
     selectLayer(videoPacketId: number, audioPacketId: number): Promise<void>;
+    selectAutomaticLayer(): Promise<void>;
+    private switchLayer;
     selectSubtitleTrack(packetId: number): void;
     setToneMappingMode(mode: createTlvDemuxModule.MseToneMappingMode): void;
     setOutputEdid(edid: Uint8Array): void;
@@ -82,6 +92,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private updateHlgSdrRenderer;
     private effectiveToneMappingMode;
     private maybeStartPlayback;
+    private handleQueueUpdate;
+    private handlePlaybackDamage;
+    private showDamageNotice;
+    private clearDamageNotice;
+    private resetPlaybackDamage;
     private applyBackpressure;
     private bufferedAhead;
     private isMseCompatibleAudioTrack;

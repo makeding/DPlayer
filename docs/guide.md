@@ -227,6 +227,8 @@ const dp = new DPlayer({
     ```
 
 -   `dp.switchQuality(index: number)`: switch quality
+-   `dp.selectTLVAutomaticLayer()`: restore automatic TLV layer selection
+-   `dp.selectTLVLayer(videoPacketId: number, audioPacketId: number)`: fix TLV playback to one A/V layer
 
 -   `dp.destroy()`: destroy player
 
@@ -363,10 +365,25 @@ Player events
 -   subtitle_show
 -   subtitle_hide
 -   subtitle_change
+-   tlv_playback_damage — complete `TLVPlaybackDamage` payload for TLV source damage
 
 ## Quality switching
 
 Set video url and video type in `video.quality`, set default quality by `video.defaultQuality`.
+
+For every `tlv` quality without an explicit `videoPacketId`, DPlayer initially shows only
+`<source name> (original)`. Original keeps tlvdemux automatic layer selection enabled. Once
+the current MPT exposes a complete normal/rain video and audio pair, DPlayer also shows
+`<source name> (normal broadcast)` and `<source name> (rain broadcast)`. Selecting either
+of those entries disables automatic selection and fixes both audio and video to that layer;
+select Original again to restore automatic selection. If a fixed layer disappears from the
+current MPT, DPlayer must restore Original before hiding both manual entries. A failed restore
+keeps the existing visible state and reports the concrete error. Qualities with an explicit
+`videoPacketId` are never expanded.
+
+`dp.selectTLVAutomaticLayer()` restores automatic TLV layer selection. `dp.selectTLVLayer(videoPacketId,
+audioPacketId)` is a manual, fixed-layer selection and atomically restores the previous mode if
+the switch fails.
 
 <DPlayer :options="{
     video: {
