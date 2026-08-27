@@ -372,12 +372,14 @@ Player events
 Set video url and video type in `video.quality`, set default quality by `video.defaultQuality`.
 
 For every `tlv` quality without an explicit `videoPacketId`, DPlayer initially shows only
-`<source name> (original)`. Original keeps tlvdemux automatic layer selection enabled. Once
+`<source name>`. This source entry keeps tlvdemux automatic layer selection enabled. Once
 the current MPT exposes a complete normal/rain video and audio pair, DPlayer also shows
 `<source name> (normal broadcast)` and `<source name> (rain broadcast)`. Selecting either
 of those entries disables automatic selection and fixes both audio and video to that layer;
-select Original again to restore automatic selection. If a fixed layer disappears from the
-current MPT, DPlayer must restore Original before hiding both manual entries. A failed restore
+select the source entry again to restore automatic selection. Every accepted quality click
+returns to the parent settings menu immediately; the checkmark changes only after the layer
+switch succeeds. If a fixed layer disappears from the current MPT, DPlayer must restore the
+source entry before hiding both manual entries. A failed restore
 keeps the existing visible state and reports the concrete error. Qualities with an explicit
 `videoPacketId` are never expanded.
 

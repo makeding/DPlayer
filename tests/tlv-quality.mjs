@@ -13,7 +13,6 @@ import {visibleQualityCount} from '../src/ts/quality-visibility.ts';
 import I18n from '../src/ts/i18n.ts';
 
 const labels = {
-    original: 'original',
     preferred: '通常放送',
     fallback: '降雨放送',
 };
@@ -52,6 +51,7 @@ function makePlayer() {
     installDynamicTLVQualities(options, labels);
     const visibility = new Map();
     const notices = [];
+    const navigation = [];
     const player = {
         options,
         type: 'tlv',
@@ -67,7 +67,7 @@ function makePlayer() {
                 dataset: {index: String(index)},
                 classList: {toggle() {}},
             })),
-            settingBox: {classList: {remove() {}}},
+            settingBox: {classList: {remove: name => navigation.push(name)}},
         },
         selectTLVLayer: async () => {},
         selectTLVAutomaticLayer: async () => {},
@@ -75,7 +75,7 @@ function makePlayer() {
         tran: text => text,
     };
     const quality = new TLVQuality(player);
-    return {player, quality, visibility, notices};
+    return {player, quality, visibility, notices, navigation};
 }
 
 test('dynamic TLV sources expand to original/preferred/fallback while explicit packet IDs do not', () => {
@@ -85,7 +85,7 @@ test('dynamic TLV sources expand to original/preferred/fallback while explicit p
     });
     installDynamicTLVQualities(options, labels);
     assert.deepEqual(options.video.quality.map(quality => quality.name), [
-        'BS4K (original)', 'BS4K（通常放送）', 'BS4K（降雨放送）', 'Fixed',
+        'BS4K', 'BS4K（通常放送）', 'BS4K（降雨放送）', 'Fixed',
     ]);
     assert.deepEqual(options.video.quality.map(quality => quality.tlvDynamicLayer?.role), [
         'original', 'preferred', 'fallback', undefined,
@@ -104,7 +104,7 @@ test('only original is initially visible and an MPT-first sequence waits for sel
     assert.deepEqual([...visibility], [[0, true], [1, true], [2, true]]);
 });
 
-test('automatic layer changes keep Original selected while manual changes select the fixed row', async () => {
+test('automatic layer changes keep the source entry selected while manual changes select the fixed row', async () => {
     const {quality, player} = makePlayer();
     quality.sync({tracks: allTracks, version: 1});
     quality.syncSelection({videoTrack: fallbackVideo, audioTrack: fallbackAudio});
@@ -119,6 +119,35 @@ test('automatic layer changes keep Original selected while manual changes select
     assert.equal(quality.select(0), true);
     await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(automaticCalls, 1);
+    assert.equal(player.qualityIndex, 0);
+});
+
+test('manual and automatic clicks return to the parent immediately but check the row only after success', async () => {
+    const {quality, player, navigation} = makePlayer();
+    quality.sync({tracks: allTracks, version: 1});
+    let resolveSwitch;
+    player.selectTLVLayer = () => new Promise(resolve => { resolveSwitch = resolve; });
+
+    assert.equal(quality.select(2), true);
+    assert.deepEqual(navigation, ['dplayer-setting-box-quality']);
+    assert.equal(player.qualityIndex, 0);
+
+    resolveSwitch();
+    await new Promise(resolve => setTimeout(resolve, 0));
+    assert.equal(player.qualityIndex, 2);
+    assert.deepEqual(navigation, ['dplayer-setting-box-quality']);
+
+    let resolveAutomatic;
+    player.selectTLVAutomaticLayer = () => new Promise(resolve => { resolveAutomatic = resolve; });
+    assert.equal(quality.select(0), true);
+    assert.deepEqual(navigation, [
+        'dplayer-setting-box-quality',
+        'dplayer-setting-box-quality',
+    ]);
+    assert.equal(player.qualityIndex, 2);
+
+    resolveAutomatic();
+    await new Promise(resolve => setTimeout(resolve, 0));
     assert.equal(player.qualityIndex, 0);
 });
 
@@ -220,16 +249,16 @@ test('quality menu height counts only visible entries', () => {
     assert.equal(visibleQualityCount([{hidden: false}, {hidden: false}, {hidden: false}]), 3);
 });
 
-test('all supported product locales define the three dynamic TLV labels', () => {
+test('all supported product locales define the two manual TLV labels', () => {
     const expected = {
-        'en': ['original', 'Normal broadcast', 'Rain broadcast'],
-        'zh-cn': ['原始', '通常放送', '降雨放送'],
-        'zh-tw': ['原始', '通常放送', '降雨放送'],
-        'ja-jp': ['オリジナル', '通常放送', '降雨放送'],
+        'en': ['Normal broadcast', 'Rain broadcast'],
+        'zh-cn': ['通常放送', '降雨放送'],
+        'zh-tw': ['通常放送', '降雨放送'],
+        'ja-jp': ['通常放送', '降雨放送'],
     };
     for (const [locale, labels] of Object.entries(expected)) {
         const translate = new I18n(locale).tran;
-        assert.deepEqual(['original', 'Normal broadcast', 'Rain broadcast'].map(translate), labels);
+        assert.deepEqual(['Normal broadcast', 'Rain broadcast'].map(translate), labels);
     }
 });
 

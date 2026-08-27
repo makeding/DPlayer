@@ -1,7 +1,6 @@
 import type DPlayer from './player';
 import type * as DPlayerType from './types';
 export interface TLVQualityLabels {
-    original: string;
     preferred: string;
     fallback: string;
 }

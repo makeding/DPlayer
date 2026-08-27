@@ -81,7 +81,6 @@ class DPlayer {
         // @ts-expect-error TS(7009): 'new' expression, whose target lacks a construct s... Remove this comment to see the full error message
         this.tran = new i18n(this.options.lang).tran;
         installDynamicTLVQualities(this.options, {
-            original: this.tran('original'),
             preferred: this.tran('Normal broadcast'),
             fallback: this.tran('Rain broadcast'),
         });

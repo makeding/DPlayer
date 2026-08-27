@@ -4,7 +4,6 @@ import type * as DPlayerType from './types';
 type DynamicRole = 'original' | 'preferred' | 'fallback';
 
 export interface TLVQualityLabels {
-    original: string;
     preferred: string;
     fallback: string;
 }
@@ -36,7 +35,7 @@ export function installDynamicTLVQualities(
         }
         qualities.push({
             ...quality,
-            name: `${quality.name} (${labels.original})`,
+            name: quality.name,
             tlvDynamicLayer: {role: 'original', sourceIndex},
         });
         qualities.push({
@@ -103,6 +102,7 @@ export default class TLVQuality {
         const layer = quality?.tlvDynamicLayer;
         if (!quality || !layer) return false;
         if (this.activeSourceIndex() !== layer.sourceIndex) return false;
+        this.player.template.settingBox.classList.remove('dplayer-setting-box-quality');
         if (this.pendingRole !== null || this.restoringMissingLayer) return true;
         if (this.player.qualityIndex === index) return true;
 
@@ -230,7 +230,6 @@ export default class TLVQuality {
         this.player.template.qualityItem.forEach((item) => {
             item.classList.toggle('dplayer-setting-quality-current', Number(item.dataset.index) === index);
         });
-        this.player.template.settingBox.classList.remove('dplayer-setting-box-quality');
         if (showNotice) this.player.notice(`${this.player.tran('Switched to')} ${target.name}`);
     }
 

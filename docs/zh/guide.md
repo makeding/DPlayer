@@ -355,11 +355,12 @@ dp.on('ended', function () {
 
 在 `video.quality` 里设置不同清晰度的视频链接和类型，`video.defaultQuality` 设置默认清晰度
 
-每个未显式指定 `videoPacketId` 的 `tlv` 画质初始只显示 `<源名称> (original)`，并保持
+每个未显式指定 `videoPacketId` 的 `tlv` 画质初始只显示 `<源名称>`，该源名称档保持
 tlvdemux 自动选层。当前 MPT 暴露出音视频均完整的通常放送/降雨放送层对后，DPlayer 才同时
 显示 `<源名称>（通常放送）` 与 `<源名称>（降雨放送）`。选择任一手动档都会关闭自动选层并
-固定对应音视频；重新选择 Original 才恢复自动选层。若固定层从当前 MPT 消失，DPlayer 必须
-先恢复 Original，再隐藏两个手动档；恢复失败时保留既有可见状态并显示具体错误。显式指定
+固定对应音视频；重新选择源名称档才恢复自动选层。每次有效的画质点击都立即返回上一级设置
+菜单，勾选状态只在切层成功后更新。若固定层从当前 MPT 消失，DPlayer 必须先恢复源名称档，
+再隐藏两个手动档；恢复失败时保留既有可见状态并显示具体错误。显式指定
 `videoPacketId` 的画质不会展开。
 
 `dp.selectTLVAutomaticLayer()` 恢复 TLV 自动选层。`dp.selectTLVLayer(videoPacketId,
