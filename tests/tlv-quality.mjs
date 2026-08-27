@@ -4,7 +4,9 @@ import test from 'node:test';
 import TLVQuality, {installDynamicTLVQualities} from '../src/ts/tlv-quality.ts';
 import {
     availableMptTracks,
+    configureAutomaticTLVLayer,
     resolveTLVLayerPair,
+    selectAutomaticTLVLayer,
     selectManualTLVLayer,
 } from '../src/ts/tlv-layer-selection.ts';
 import {visibleQualityCount} from '../src/ts/quality-visibility.ts';
@@ -176,6 +178,41 @@ test('manual selection disables automatic switching and rolls it back after a fa
         async () => { calls.push('restore'); },
     ), /switch rejected/);
     assert.deepEqual(calls, ['disable', 'switch', 'restore']);
+});
+
+test('automatic selection returns to preferred and restores manual mode after configuration failure', async () => {
+    const calls = [];
+    await assert.rejects(selectAutomaticTLVLayer({
+        pair: {preferred: {video: preferredVideo, audio: preferredAudio}, fallback: null},
+        currentVideoTrackId: fallbackVideo.trackId,
+        currentAudioTrackId: fallbackAudio.trackId,
+        previousLayer: {video: fallbackVideo, audio: fallbackAudio},
+        switchLayer: async layer => { calls.push(`switch:${layer.video.packetId.toString(16)}`); },
+        setAutomaticMode: () => { calls.push('mode:auto'); },
+        enableAutomatic: async () => { calls.push('enable'); throw new Error('configure rejected'); },
+        setPreviousMode: () => { calls.push('mode:manual'); },
+        disableAutomatic: async () => { calls.push('disable'); },
+    }), /configure rejected/);
+    assert.deepEqual(calls, [
+        'switch:f300', 'mode:auto', 'enable', 'mode:manual', 'disable', 'switch:f301',
+    ]);
+});
+
+test('automatic layer configuration replaces stale pairs and clears missing pairs', async () => {
+    const calls = [];
+    const demuxer = {
+        clearAutomaticLayerSwitch: async () => { calls.push('clear'); },
+        configureAutomaticLayerSwitch: async (...ids) => { calls.push(ids.map(String).join(':')); },
+    };
+    const pair = {
+        preferred: {video: preferredVideo, audio: preferredAudio},
+        fallback: {video: fallbackVideo, audio: fallbackAudio},
+    };
+    const signature = await configureAutomaticTLVLayer(demuxer, pair, null, false);
+    assert.equal(signature, '1:3:2:4');
+    assert.deepEqual(calls, ['1:3:2:4']);
+    assert.equal(await configureAutomaticTLVLayer(demuxer, null, signature, false), 'unavailable');
+    assert.deepEqual(calls, ['1:3:2:4', 'clear']);
 });
 
 test('quality menu height counts only visible entries', () => {

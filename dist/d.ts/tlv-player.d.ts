@@ -47,6 +47,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchError;
     private layerSwitchPending;
     private automaticLayerPairSignature;
+    private automaticLayerConfigurationSequence;
     private currentMptSnapshot;
     private toneMappingMode;
     private hlgSdrColorLut;

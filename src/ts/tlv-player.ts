@@ -4,7 +4,13 @@ import {MseAppendQueue, finalizeMseMediaSource} from 'tlvdemux/mse-append-queue'
 
 import type * as DPlayerType from './types';
 import HlgSdrRenderer from './hlg-sdr-player-renderer';
-import {availableMptTracks, resolveTLVLayerPair, selectManualTLVLayer} from './tlv-layer-selection';
+import {
+    availableMptTracks,
+    configureAutomaticTLVLayer,
+    resolveTLVLayerPair,
+    selectAutomaticTLVLayer,
+    selectManualTLVLayer,
+} from './tlv-layer-selection';
 import {createTlvPlaybackDamageRecovery} from './tlv-playback-damage.mjs';
 import {TlvWorkerClient, WorkerDemuxer} from './tlv-worker-client';
 
@@ -171,6 +177,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private audioSwitchError: Error | null = null;
     private layerSwitchPending: LayerSwitchRequest | null = null;
     private automaticLayerPairSignature: string | null = null;
+    private automaticLayerConfigurationSequence = 0;
     private currentMptSnapshot: DPlayerType.TLVMptSnapshot | null = null;
     private toneMappingMode: createTlvDemuxModule.MseToneMappingMode = 'auto';
     private hlgSdrColorLut: createTlvDemuxModule.HlgSdrColorLut | null = null;
@@ -301,8 +308,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const wasAutomatic = this.preferredVideoPacketId === null;
         await selectManualTLVLayer(
             async () => {
+                const sequence = ++this.automaticLayerConfigurationSequence;
                 await demuxer.clearAutomaticLayerSwitch();
-                this.automaticLayerPairSignature = 'disabled';
+                if (sequence === this.automaticLayerConfigurationSequence && demuxer === this.demuxer) {
+                    this.automaticLayerPairSignature = 'disabled';
+                }
             },
             async () => {
                 if (this.selectedTrackIds.get('video') === videoTrack.trackId &&
@@ -324,33 +334,29 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             this.trackByPacket('video', previousVideoPacketId);
         const previousAudio = previousAudioPacketId === null ? undefined :
             this.trackByPacket('audio', previousAudioPacketId);
-        const pair = this.layerPair();
-        try {
-            if (pair && (this.selectedTrackIds.get('video') !== pair.preferred.video.trackId ||
-                this.selectedTrackIds.get('audio') !== pair.preferred.audio.trackId)) {
-                await this.switchLayer(demuxer, pair.preferred.video, pair.preferred.audio);
-            }
-            this.preferredVideoPacketId = null;
-            this.preferredAudioPacketId = null;
-            await this.configureAutomaticLayerSwitch(true);
-        } catch (error) {
-            this.preferredVideoPacketId = previousVideoPacketId;
-            this.preferredAudioPacketId = previousAudioPacketId;
-            try {
+        await selectAutomaticTLVLayer({
+            pair: this.layerPair(),
+            currentVideoTrackId: this.selectedTrackIds.get('video'),
+            currentAudioTrackId: this.selectedTrackIds.get('audio'),
+            previousLayer: previousVideo && previousAudio ? {video: previousVideo, audio: previousAudio} : null,
+            switchLayer: layer => this.switchLayer(demuxer, layer.video, layer.audio),
+            setAutomaticMode: () => {
+                this.preferredVideoPacketId = null;
+                this.preferredAudioPacketId = null;
+            },
+            enableAutomatic: () => this.configureAutomaticLayerSwitch(true),
+            setPreviousMode: () => {
+                this.preferredVideoPacketId = previousVideoPacketId;
+                this.preferredAudioPacketId = previousAudioPacketId;
+            },
+            disableAutomatic: async () => {
+                const sequence = ++this.automaticLayerConfigurationSequence;
                 await demuxer.clearAutomaticLayerSwitch();
-                this.automaticLayerPairSignature = 'disabled';
-                if (previousVideo && previousAudio &&
-                    (this.selectedTrackIds.get('video') !== previousVideo.trackId ||
-                     this.selectedTrackIds.get('audio') !== previousAudio.trackId)) {
-                    await this.switchLayer(demuxer, previousVideo, previousAudio);
+                if (sequence === this.automaticLayerConfigurationSequence && demuxer === this.demuxer) {
+                    this.automaticLayerPairSignature = 'disabled';
                 }
-            } catch (restoreError) {
-                const message = error instanceof Error ? error.message : String(error);
-                const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError);
-                throw new Error(`${message} Manual mode rollback failed: ${restoreMessage}`);
-            }
-            throw error;
-        }
+            },
+        });
     }
 
     private async switchLayer(
@@ -542,6 +548,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.tracks.length = 0;
         this.selectedTrackIds.clear();
         this.currentMptSnapshot = null;
+        this.automaticLayerConfigurationSequence += 1;
         this.automaticLayerPairSignature = null;
         this.bridge.invalidateQualitySnapshot();
         this.videoProperties = null;
@@ -1210,33 +1217,17 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private async configureAutomaticLayerSwitch(force = false): Promise<void> {
         const demuxer = this.demuxer;
         if (!demuxer) return;
-        if (this.preferredVideoPacketId !== null) {
-            if (force || this.automaticLayerPairSignature !== 'disabled') {
-                await demuxer.clearAutomaticLayerSwitch();
-                this.automaticLayerPairSignature = 'disabled';
-            }
-            return;
-        }
-        const pair = this.layerPair();
-        if (!pair?.fallback) {
-            if (force || this.automaticLayerPairSignature !== 'unavailable') {
-                await demuxer.clearAutomaticLayerSwitch();
-                this.automaticLayerPairSignature = 'unavailable';
-            }
-            return;
-        }
-        const signature = [
-            pair.preferred.video.trackId,
-            pair.preferred.audio.trackId,
-            pair.fallback.video.trackId,
-            pair.fallback.audio.trackId,
-        ].join(':');
-        if (!force && signature === this.automaticLayerPairSignature) return;
-        await demuxer.configureAutomaticLayerSwitch(
-            pair.preferred.video.trackId, pair.preferred.audio.trackId,
-            pair.fallback.video.trackId, pair.fallback.audio.trackId,
+        const sequence = ++this.automaticLayerConfigurationSequence;
+        const signature = await configureAutomaticTLVLayer(
+            demuxer,
+            this.layerPair(),
+            this.automaticLayerPairSignature,
+            this.preferredVideoPacketId !== null,
+            force,
         );
-        this.automaticLayerPairSignature = signature;
+        if (sequence === this.automaticLayerConfigurationSequence && demuxer === this.demuxer) {
+            this.automaticLayerPairSignature = signature;
+        }
     }
 
     private subtitleTrackKind(track: DPlayerType.TLVTrackInfo): 'caption' | 'superimpose' {

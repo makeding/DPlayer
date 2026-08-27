@@ -15,7 +15,8 @@ export function availableMptTracks(
     selectableTracks: readonly DPlayerType.TLVTrackInfo[],
 ): DPlayerType.TLVTrackInfo[] {
     return snapshotTracks.filter(snapshotTrack => selectableTracks.some(selectable =>
-        selectable.kind === snapshotTrack.kind && selectable.trackId === snapshotTrack.trackId));
+        selectable.kind === snapshotTrack.kind && selectable.trackId === snapshotTrack.trackId &&
+        selectable.packetId === snapshotTrack.packetId && selectable.contextId === snapshotTrack.contextId));
 }
 
 export async function selectManualTLVLayer(
@@ -38,6 +39,76 @@ export async function selectManualTLVLayer(
         }
         throw error;
     }
+}
+
+export async function selectAutomaticTLVLayer(options: {
+    pair: TLVLayerPair | null;
+    currentVideoTrackId?: bigint;
+    currentAudioTrackId?: bigint;
+    previousLayer: TLVLayer | null;
+    switchLayer: (layer: TLVLayer) => Promise<void>;
+    setAutomaticMode: () => void;
+    enableAutomatic: () => Promise<void>;
+    setPreviousMode: () => void;
+    disableAutomatic: () => Promise<void>;
+}): Promise<void> {
+    try {
+        if (options.pair && (options.currentVideoTrackId !== options.pair.preferred.video.trackId ||
+            options.currentAudioTrackId !== options.pair.preferred.audio.trackId)) {
+            await options.switchLayer(options.pair.preferred);
+        }
+        options.setAutomaticMode();
+        await options.enableAutomatic();
+    } catch (error) {
+        options.setPreviousMode();
+        try {
+            await options.disableAutomatic();
+            if (options.previousLayer) await options.switchLayer(options.previousLayer);
+        } catch (restoreError) {
+            const message = error instanceof Error ? error.message : String(error);
+            const restoreMessage = restoreError instanceof Error ? restoreError.message : String(restoreError);
+            throw new Error(`${message} Manual mode rollback failed: ${restoreMessage}`);
+        }
+        throw error;
+    }
+}
+
+export async function configureAutomaticTLVLayer(
+    demuxer: {
+        clearAutomaticLayerSwitch(): Promise<void>;
+        configureAutomaticLayerSwitch(
+            preferredVideoTrackId: bigint,
+            preferredAudioTrackId: bigint,
+            fallbackVideoTrackId: bigint,
+            fallbackAudioTrackId: bigint,
+        ): Promise<void>;
+    },
+    pair: TLVLayerPair | null,
+    previousSignature: string | null,
+    manual: boolean,
+    force = false,
+): Promise<string> {
+    if (manual) {
+        if (force || previousSignature !== 'disabled') await demuxer.clearAutomaticLayerSwitch();
+        return 'disabled';
+    }
+    if (!pair?.fallback) {
+        if (force || previousSignature !== 'unavailable') await demuxer.clearAutomaticLayerSwitch();
+        return 'unavailable';
+    }
+    const signature = [
+        pair.preferred.video.trackId,
+        pair.preferred.audio.trackId,
+        pair.fallback.video.trackId,
+        pair.fallback.audio.trackId,
+    ].join(':');
+    if (force || signature !== previousSignature) {
+        await demuxer.configureAutomaticLayerSwitch(
+            pair.preferred.video.trackId, pair.preferred.audio.trackId,
+            pair.fallback.video.trackId, pair.fallback.audio.trackId,
+        );
+    }
+    return signature;
 }
 
 export function selectionLevel(
