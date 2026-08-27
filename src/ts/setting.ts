@@ -10,7 +10,7 @@ class Setting {
     loop: boolean;
     showDanmaku: boolean;
     unlimitDanmaku: boolean;
-    currentAudio: 'primary' | 'secondary' = 'primary';
+    currentAudio: DPlayerType.AudioChannel = 'primary';
     toneMappingMode: DPlayerType.ToneMappingMode = 'auto';
     toneMappingModeBeforeComparison: DPlayerType.ToneMappingMode = 'auto';
     resizeObserver: ResizeObserver;
@@ -78,51 +78,16 @@ class Setting {
         });
         for (let i = 0; i < this.player.template.audioItem.length; i++) {
             this.player.template.audioItem[i].addEventListener('click', () => {
-                // for mpegts
-                if (this.player.plugins.mpegts && window.mpegts && this.player.plugins.mpegts instanceof window.mpegts.MSEPlayer) {
-                    if (this.player.template.audioItem[i].dataset.audio === this.currentAudio) {
-                        return;  // already on this audio
-                    }
-                    if (this.player.template.audioItem[i].dataset.audio === 'primary') {
-                        // switch primary audio
-                        this.currentAudio = 'primary';
-                        this.player.template.audioItem[0].classList.add('dplayer-setting-audio-current');
-                        this.player.template.audioItem[1].classList.remove('dplayer-setting-audio-current');
-                        this.player.template.audioValue.textContent = this.player.tran('Primary audio');
-                        this.player.plugins.mpegts.switchPrimaryAudio();
-                    } else if (this.player.template.audioItem[i].dataset.audio === 'secondary') {
-                        // switch secondary audio
-                        this.currentAudio = 'secondary';
-                        this.player.template.audioItem[0].classList.remove('dplayer-setting-audio-current');
-                        this.player.template.audioItem[1].classList.add('dplayer-setting-audio-current');
-                        this.player.template.audioValue.textContent = this.player.tran('Secondary audio');
-                        this.player.plugins.mpegts.switchSecondaryAudio();
-                    }
+                const audio = this.player.template.audioItem[i].dataset.audio as DPlayerType.AudioChannel;
+
+                // A click on the selected item has no backend state to change
+                if (audio === this.currentAudio) {
                     this.player.template.settingBox.classList.remove('dplayer-setting-box-audio');
-                // for hls.js
-                } else if (this.player.plugins.hls && window.Hls && this.player.plugins.hls instanceof window.Hls) {
-                    const hls = this.player.plugins.hls;
-                    if (hls.audioTracks.length <= 1) {
-                        return;  // no multiple audio tracks
-                    }
-                    if (this.player.template.audioItem[i].dataset.audio === this.currentAudio) {
-                        return;  // already on this audio
-                    }
-                    if (this.player.template.audioItem[i].dataset.audio === 'primary') {
-                        // switch to primary audio track (index 0)
-                        this.currentAudio = 'primary';
-                        this.player.template.audioItem[0].classList.add('dplayer-setting-audio-current');
-                        this.player.template.audioItem[1].classList.remove('dplayer-setting-audio-current');
-                        this.player.template.audioValue.textContent = this.player.tran('Primary audio');
-                        hls.audioTrack = 0;
-                    } else if (this.player.template.audioItem[i].dataset.audio === 'secondary') {
-                        // switch to secondary audio track (index 1)
-                        this.currentAudio = 'secondary';
-                        this.player.template.audioItem[0].classList.remove('dplayer-setting-audio-current');
-                        this.player.template.audioItem[1].classList.add('dplayer-setting-audio-current');
-                        this.player.template.audioValue.textContent = this.player.tran('Secondary audio');
-                        hls.audioTrack = 1;
-                    }
+                    return;
+                }
+
+                // Keep the settings panel open when the active backend cannot offer the requested channel
+                if (this.player.switchAudio(audio)) {
                     this.player.template.settingBox.classList.remove('dplayer-setting-box-audio');
                 }
             });
@@ -279,6 +244,19 @@ class Setting {
     private syncQualityPanelHeight(): void {
         const visibleItems = visibleQualityCount(this.player.template.qualityItem);
         this.player.template.settingBox.style.setProperty('--quality-length', String(visibleItems));
+    }
+
+    /**
+     * Reflect the selected broadcast audio channel in the settings UI
+     * @param audio Selected audio channel
+     */
+    setCurrentAudio(audio: DPlayerType.AudioChannel): void {
+        const isSecondaryAudio = audio === 'secondary';
+        this.currentAudio = audio;
+        this.player.template.audioItem[0].classList.toggle('dplayer-setting-audio-current', !isSecondaryAudio);
+        this.player.template.audioItem[1].classList.toggle('dplayer-setting-audio-current', isSecondaryAudio);
+        this.player.template.audioValue.textContent = isSecondaryAudio ?
+            this.player.tran('Secondary audio') : this.player.tran('Primary audio');
     }
 
     hide(): void {

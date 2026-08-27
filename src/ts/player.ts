@@ -25,6 +25,7 @@ import TLVQuality, {installDynamicTLVQualities} from './tlv-quality';
 import tplVideo from '../template/video.art';
 import defaultApiBackend from './api';
 import * as DPlayerType from './types';
+import type { PlayerState, PrivateStream, Progress, Stats } from 'mpeg2toh264/player';
 
 let index = 0;
 const instances: DPlayer[] = [];
@@ -56,6 +57,7 @@ class DPlayer {
     narrow = false;
     noticeTime: number | null = null;
     options: DPlayerType.OptionsInternal;
+    mediaBackendDestroy: (() => void) | null = null;
     paused = false;
     plugins: DPlayerType.Plugins;
     prevVideoCurrentTime = 0;
@@ -65,6 +67,8 @@ class DPlayer {
     switchingQuality = false;
     private tlvOutputEdid: Uint8Array | null = null;
     private tlvOutputConnected: boolean | null = null;
+    // A replacement media backend consumes this selection after publishing its audio metadata
+    pendingAudio: DPlayerType.AudioChannel | null = null;
     resizeObserver: ResizeObserver;
     tran: (text: string) => string;
     type: DPlayerType.VideoType | string = 'auto';
@@ -159,12 +163,13 @@ class DPlayer {
 
         this.contextmenu = new ContextMenu(this);
 
+        // mpeg2toh264 load() emits statechange before returning, so the panel has to exist first
+        this.infoPanel = new InfoPanel(this);
+
         this.initVideo(this.video, (this.quality && this.quality.type) || this.options.video.type);
 
         this.setting = new Setting(this);
         this.tlvQuality = new TLVQuality(this);
-
-        this.infoPanel = new InfoPanel(this);
 
         if (!this.danmaku && this.options.autoplay) {
             this.play();
@@ -578,10 +583,8 @@ class DPlayer {
     }
 
     initMSE(video: HTMLVideoElement, type: DPlayerType.VideoType | string): void {
-        if (this.plugins.tlv) {
-            this.plugins.tlv.destroy();
-            delete this.plugins.tlv;
-        }
+        // A video element has exactly one media backend, so switching formats releases the previous owner first
+        this.destroyMediaBackend();
         this.type = type;
         this.tlvQuality?.reset();
         if (this.options.video.customType && this.options.video.customType[type]) {
@@ -604,6 +607,7 @@ class DPlayer {
                     this.type = 'normal';
                 }
             }
+            // mpegts exposes its broadcast audio API immediately; the other backends publish availability later
             this.setAudioSwitchingAvailable(this.type === 'mpegts');
 
             switch (this.type) {
@@ -611,22 +615,6 @@ class DPlayer {
                 case 'hls':
                     if (window.Hls) {
                         if (window.Hls.isSupported()) {
-                            // if it has already been initialized, destroy it once
-                            if (this.plugins.hls) {
-                                // destroy aribb24 caption
-                                if (this.plugins.aribb24Caption) {
-                                    this.plugins.aribb24Caption.dispose();
-                                    delete this.plugins.aribb24Caption;
-                                }
-                                // destroy aribb24 superimpose
-                                if (this.plugins.aribb24Superimpose) {
-                                    this.plugins.aribb24Superimpose.dispose();
-                                    delete this.plugins.aribb24Superimpose;
-                                }
-                                this.plugins.hls.destroy();
-                                delete this.plugins.hls;
-                            }
-
                             // initialize hls.js
                             const hlsOptions = this.options.pluginOptions.hls;
                             const hls = new window.Hls(hlsOptions);
@@ -637,10 +625,14 @@ class DPlayer {
                             // Listen for audio tracks updates
                             hls.on(window.Hls.Events.AUDIO_TRACKS_UPDATED, () => {
                                 this.setAudioSwitchingAvailable(hls.audioTracks.length >= 2);
+                                // A quality switch may finish before hls.js publishes its audio tracks
+                                if (this.pendingAudio !== null) {
+                                    this.switchAudio(this.pendingAudio);
+                                }
                             });
 
-                            // processing when destroy
-                            this.events.on('destroy', () => {
+                            // Keep the cleanup paired with this exact instance across quality and format switches
+                            this.mediaBackendDestroy = () => {
                                 // destroy aribb24 caption
                                 if (this.plugins.aribb24Caption) {
                                     this.plugins.aribb24Caption.dispose();
@@ -652,8 +644,10 @@ class DPlayer {
                                     delete this.plugins.aribb24Superimpose;
                                 }
                                 hls.destroy();
-                                delete this.plugins.hls;
-                            });
+                                if (this.plugins.hls === hls) {
+                                    delete this.plugins.hls;
+                                }
+                            };
 
                             // initialize aribb24.js
                             // https://github.com/monyone/aribb24.js
@@ -695,18 +689,8 @@ class DPlayer {
                             }
                         } else if (video.canPlayType('application/x-mpegURL') || video.canPlayType('application/vnd.apple.mpegURL')) {
                             // normal playback
-                            // if it has already been initialized, destroy it once
-                            if (this.plugins.aribb24Caption) {
-                                this.plugins.aribb24Caption.dispose();
-                                delete this.plugins.aribb24Caption;
-                            }
-                            if (this.plugins.aribb24Superimpose) {
-                                this.plugins.aribb24Superimpose.dispose();
-                                delete this.plugins.aribb24Superimpose;
-                            }
-
-                            // processing when destroy
-                            this.events.on('destroy', () => {
+                            // Native HLS has no plugin instance, but its renderers still follow the media backend lifetime
+                            this.mediaBackendDestroy = () => {
                                 // destroy aribb24 caption
                                 if (this.plugins.aribb24Caption) {
                                     this.plugins.aribb24Caption.dispose();
@@ -717,7 +701,7 @@ class DPlayer {
                                     this.plugins.aribb24Superimpose.dispose();
                                     delete this.plugins.aribb24Superimpose;
                                 }
-                            });
+                            };
 
                             // initialize aribb24.js
                             // https://github.com/monyone/aribb24.js
@@ -756,29 +740,6 @@ class DPlayer {
                 case 'mpegts':
                     if (window.mpegts) {
                         if (window.mpegts.isSupported()) {
-                            // if it has already been initialized, destroy it once
-                            if (this.plugins.mpegts) {
-                                // destroy aribb24 caption
-                                if (this.plugins.aribb24Caption) {
-                                    this.plugins.aribb24Caption.dispose();
-                                    delete this.plugins.aribb24Caption;
-                                }
-                                // destroy aribb24 superimpose
-                                if (this.plugins.aribb24Superimpose) {
-                                    this.plugins.aribb24Superimpose.dispose();
-                                    delete this.plugins.aribb24Superimpose;
-                                }
-                                if (this.plugins.aribb62) {
-                                    this.plugins.aribb62.renderer.destroy();
-                                    this.plugins.aribb62.overlay.remove();
-                                    delete this.plugins.aribb62;
-                                }
-                                this.plugins.mpegts.unload();
-                                this.plugins.mpegts.detachMediaElement();
-                                this.plugins.mpegts.destroy();
-                                delete this.plugins.mpegts;
-                            }
-
                             // initialize mpegts.js
                             if (this.options.pluginOptions.mpegts === undefined) {
                                 this.options.pluginOptions.mpegts = {};
@@ -795,8 +756,8 @@ class DPlayer {
                             mpegtsPlayer.attachMediaElement(video);
                             mpegtsPlayer.load();
 
-                            // processing when destroy
-                            this.events.on('destroy', () => {
+                            // Preserve mpegts.js's established unload and detach order for this instance
+                            this.mediaBackendDestroy = () => {
                                 // destroy aribb24 caption
                                 if (this.plugins.aribb24Caption) {
                                     this.plugins.aribb24Caption.dispose();
@@ -815,8 +776,10 @@ class DPlayer {
                                 mpegtsPlayer.unload();
                                 mpegtsPlayer.detachMediaElement();
                                 mpegtsPlayer.destroy();
-                                delete this.plugins.mpegts;
-                            });
+                                if (this.plugins.mpegts === mpegtsPlayer) {
+                                    delete this.plugins.mpegts;
+                                }
+                            };
 
                             // initialize aribb24.js
                             // https://github.com/monyone/aribb24.js
@@ -914,14 +877,138 @@ class DPlayer {
                     if (this.tlvOutputConnected !== null) {
                         tlvPlayer.setOutputConnected(this.tlvOutputConnected);
                     }
-                    this.events.on('destroy', () => {
+                    this.mediaBackendDestroy = () => {
                         if (this.plugins.tlv === tlvPlayer) {
                             tlvPlayer.destroy();
                             delete this.plugins.tlv;
                         }
-                    });
+                    };
                     break;
                 }
+                // https://github.com/otya128/mpeg2toh264
+                case 'mpeg2toh264':
+                    if (window.mpeg2toh264) {
+                        const mpeg2toh264 = window.mpeg2toh264;
+
+                        const userMpeg2ToH264Options = this.options.pluginOptions.mpeg2toh264 ?? {};
+                        const userDeinterlacer = userMpeg2ToH264Options.deinterlacer;
+                        // The page constructs the deinterlacer; subscribe to its stats event after it exists
+                        const mpeg2toh264Player = new mpeg2toh264.Mpeg2TsPlayer(
+                            video,
+                            {
+                                ...userMpeg2ToH264Options,
+                                deinterlacer: userDeinterlacer && ((element) => {
+                                    const instance = userDeinterlacer(element);
+                                    this.infoPanel.watchMpeg2ToH264Deinterlacer(instance);
+                                    return instance;
+                                }),
+                            },
+                        );
+                        this.plugins.mpeg2toh264 = mpeg2toh264Player;
+
+                        // Conversion failures use DPlayer's existing notice surface while callers can observe the plugin directly
+                        mpeg2toh264Player.addEventListener('error', (event) => {
+                            this.notice(`Error: ${event.detail.error.message}`, undefined, undefined, '#FF6F6A');
+                        });
+
+                        const updateStats = (event: CustomEvent<Stats>) => {
+                            this.infoPanel.setMpeg2ToH264Stats(event.detail);
+                        };
+                        const updateState = (event: CustomEvent<{ state: PlayerState }>) => {
+                            this.infoPanel.setMpeg2ToH264State(event.detail.state);
+                        };
+                        const updateProgress = (event: CustomEvent<Progress>) => {
+                            this.infoPanel.setMpeg2ToH264Progress(event.detail);
+                        };
+                        const updateWorkers = (event: CustomEvent<{ pictureWorkers: number }>) => {
+                            this.infoPanel.setMpeg2ToH264PictureWorkers(event.detail.pictureWorkers);
+                        };
+                        mpeg2toh264Player.addEventListener('stats', updateStats);
+                        mpeg2toh264Player.addEventListener('statechange', updateState);
+                        mpeg2toh264Player.addEventListener('progress', updateProgress);
+                        mpeg2toh264Player.addEventListener('workers', updateWorkers);
+
+                        // Keep the existing two-choice UI available for a second PID or dual-mono sub channel
+                        mpeg2toh264Player.addEventListener('audio', (event) => {
+                            const audio = event.detail;
+                            this.setAudioSwitchingAvailable(
+                                audio.available.length >= 2 || audio.available[0]?.dualMono === true,
+                            );
+
+                            // Apply the requested channel as soon as the replacement backend discovers its audio streams
+                            const pendingAudio = this.pendingAudio;
+                            if (pendingAudio !== null && this.switchAudio(pendingAudio)) {
+                                return;
+                            }
+
+                            // Reflect programme-boundary audio changes in the check mark shown by DPlayer
+                            const isSecondaryAudio = audio.dualMono === true ?
+                                audio.dualMonoSub : audio.current === audio.available[1]?.pid;
+                            this.setting.setCurrentAudio(isSecondaryAudio ? 'secondary' : 'primary');
+                        });
+
+                        // aribb24.js v1 accepts the raw private PES payload under its timed PRIV owner contract
+                        if (this.options.subtitle && this.options.subtitle.type === 'aribb24') {
+                            if (this.options.pluginOptions.aribb24 === undefined) {
+                                this.options.pluginOptions.aribb24 = {};
+                            }
+                            this.options.pluginOptions.aribb24.enableAutoInBandMetadataTextTrackDetection = false;
+                            const aribb24Options = this.options.pluginOptions.aribb24;
+
+                            // Caption and superimpose share PES delivery while data_identifier selects their own payloads
+                            const aribb24Caption = this.plugins.aribb24Caption = new aribb24js.CanvasRenderer(
+                                {...aribb24Options, data_identifier: 0x80},
+                            );
+                            aribb24Caption.attachMedia(video);
+                            aribb24Caption.show();
+                            if (this.options.pluginOptions.aribb24.disableSuperimposeRenderer !== true) {
+                                const aribb24Superimpose = this.plugins.aribb24Superimpose = new aribb24js.CanvasRenderer(
+                                    {...aribb24Options, data_identifier: 0x81},
+                                );
+                                aribb24Superimpose.attachMedia(video);
+                                aribb24Superimpose.show();
+                            }
+
+                            const pushPrivateStream = (event: CustomEvent<PrivateStream>) => {
+                                // A PES without PTS cannot be placed on the media timeline and is ignored by the renderer
+                                if (event.detail.pts === null) {
+                                    return;
+                                }
+                                const data = new Uint8Array(event.detail.data);
+                                this.plugins.aribb24Caption?.pushID3v2PRIVData(event.detail.pts, 'aribb24.js', data);
+                                this.plugins.aribb24Superimpose?.pushID3v2PRIVData(event.detail.pts, 'aribb24.js', data);
+                            };
+                            mpeg2toh264Player.addEventListener('private_stream_1', pushPrivateStream);
+                            mpeg2toh264Player.addEventListener('private_stream_2', pushPrivateStream);
+                        }
+
+                        // Keep Worker, MSE, and subtitle resources under the same backend lifetime
+                        this.mediaBackendDestroy = () => {
+                            mpeg2toh264Player.removeEventListener('stats', updateStats);
+                            mpeg2toh264Player.removeEventListener('statechange', updateState);
+                            mpeg2toh264Player.removeEventListener('progress', updateProgress);
+                            mpeg2toh264Player.removeEventListener('workers', updateWorkers);
+                            this.infoPanel.resetMpeg2ToH264();
+                            if (this.plugins.aribb24Caption) {
+                                this.plugins.aribb24Caption.dispose();
+                                delete this.plugins.aribb24Caption;
+                            }
+                            if (this.plugins.aribb24Superimpose) {
+                                this.plugins.aribb24Superimpose.dispose();
+                                delete this.plugins.aribb24Superimpose;
+                            }
+                            mpeg2toh264Player.destroy();
+                            if (this.plugins.mpeg2toh264 === mpeg2toh264Player) {
+                                delete this.plugins.mpeg2toh264;
+                            }
+                        };
+
+                        // The error event above owns user-visible reporting; catch only consumes the rejected load promise
+                        void mpeg2toh264Player.load(video.src).catch(() => undefined);
+                    } else {
+                        this.notice('Error: Can\'t find mpeg2toh264.', undefined, undefined, '#FF6F6A');
+                    }
+                    break;
                 // https://github.com/Bilibili/flv.js
                 case 'flv':
                     if (window.flvjs) {
@@ -939,12 +1026,15 @@ class DPlayer {
                             this.plugins.flvjs = flvPlayer;
                             flvPlayer.attachMediaElement(video);
                             flvPlayer.load();
-                            this.events.on('destroy', () => {
+                            // Preserve flv.js's established unload and detach order for this instance
+                            this.mediaBackendDestroy = () => {
                                 flvPlayer.unload();
                                 flvPlayer.detachMediaElement();
                                 flvPlayer.destroy();
-                                delete this.plugins.flvjs;
-                            });
+                                if (this.plugins.flvjs === flvPlayer) {
+                                    delete this.plugins.flvjs;
+                                }
+                            };
                         } else {
                             this.notice('Error: flv.js is not supported.', undefined, undefined, '#FF6F6A');
                         }
@@ -960,10 +1050,13 @@ class DPlayer {
                         const options = this.options.pluginOptions.dash;
                         dashjsPlayer.updateSettings(options ?? {});
                         this.plugins.dash = dashjsPlayer;
-                        this.events.on('destroy', () => {
+                        // reset() is the teardown API provided by the supported dash.js version
+                        this.mediaBackendDestroy = () => {
                             dashjsPlayer.reset();
-                            delete this.plugins.dash;
-                        });
+                            if (this.plugins.dash === dashjsPlayer) {
+                                delete this.plugins.dash;
+                            }
+                        };
                     } else {
                         this.notice('Error: Can\'t find dash.js.', undefined, undefined, '#FF6F6A');
                     }
@@ -990,11 +1083,14 @@ class DPlayer {
                                     });
                                 }
                             });
-                            this.events.on('destroy', () => {
+                            // Preserve the removal sequence required by the supported WebTorrent version
+                            this.mediaBackendDestroy = () => {
                                 client.remove(torrentId);
                                 client.destroy();
-                                delete this.plugins.webtorrent;
-                            });
+                                if (this.plugins.webtorrent === client) {
+                                    delete this.plugins.webtorrent;
+                                }
+                            };
                         } else {
                             this.notice('Error: Webtorrent is not supported.', undefined, undefined, '#FF6F6A');
                         }
@@ -1107,6 +1203,60 @@ class DPlayer {
         }
     }
 
+    /**
+     * Apply one of DPlayer's two broadcast audio choices to the active media backend
+     * @param audio Audio channel selected by the viewer
+     * @returns Whether the active backend accepted the requested channel
+     */
+    switchAudio(audio: DPlayerType.AudioChannel): boolean {
+        // hls.js represents the primary and secondary choices as the first two audio tracks
+        if (window.Hls && this.plugins.hls && this.plugins.hls instanceof window.Hls) {
+            if (this.plugins.hls.audioTracks.length < 2) {
+                return false;
+            }
+            this.plugins.hls.audioTrack = audio === 'secondary' ? 1 : 0;
+            this.pendingAudio = null;
+            this.setting.setCurrentAudio(audio);
+            return true;
+        }
+
+        // mpegts.js exposes explicit operations for the two broadcast audio choices
+        if (window.mpegts && this.plugins.mpegts && this.plugins.mpegts instanceof window.mpegts.MSEPlayer) {
+            if (audio === 'secondary') {
+                this.plugins.mpegts.switchSecondaryAudio();
+            } else {
+                this.plugins.mpegts.switchPrimaryAudio();
+            }
+            this.pendingAudio = null;
+            this.setting.setCurrentAudio(audio);
+            return true;
+        }
+
+        // mpeg2toh264 maps the same UI to either two PIDs or two services carried as dual mono
+        if (this.plugins.mpeg2toh264) {
+            const mpeg2toh264Player = this.plugins.mpeg2toh264;
+            const mpeg2toh264Audio = mpeg2toh264Player.audio;
+            if (mpeg2toh264Audio === null) {
+                return false;
+            }
+            if (mpeg2toh264Audio.available.length >= 2) {
+                const audioStream = mpeg2toh264Audio.available[audio === 'secondary' ? 1 : 0];
+                mpeg2toh264Player.selectAudio(audioStream.pid);
+            } else if (mpeg2toh264Audio.dualMono === true) {
+                mpeg2toh264Player.selectDualMono(audio === 'secondary');
+            } else if (audio === 'primary' && mpeg2toh264Audio.available[0] !== undefined) {
+                mpeg2toh264Player.selectAudio(mpeg2toh264Audio.available[0].pid);
+            } else {
+                return false;
+            }
+            this.pendingAudio = null;
+            this.setting.setCurrentAudio(audio);
+            return true;
+        }
+
+        return false;
+    }
+
     switchQuality(index: number): void {
         index = typeof index === 'string' ? parseInt(index) : index;
         if (this.options.video.quality === undefined || this.qualityIndex === index || this.switchingQuality) {
@@ -1134,6 +1284,8 @@ class DPlayer {
         this.prevVideoCurrentTime = this.video.currentTime;
         this.prevVideo = this.video;
         this.video = videoEle;
+        // Preserve the selected channel until the replacement backend publishes enough audio metadata
+        this.pendingAudio = this.setting.currentAudio;
         this.initVideo(this.video, this.quality.type || this.options.video.type);
         if (!this.options.live) {
             this.seek(this.prevVideoCurrentTime);
@@ -1181,27 +1333,9 @@ class DPlayer {
                 const speed = parseFloat(this.template.settingBox.querySelector<HTMLElement>('.dplayer-setting-speed-current')!.dataset.speed!);
                 this.speed(speed);
 
-                // restore audio
-                const audio = this.template.settingBox.querySelector<HTMLElement>('.dplayer-setting-audio-current')!.dataset.audio!;
-                if (audio === 'secondary') {
-                    // switch secondary audio
-                    if (window.mpegts && this.plugins.mpegts && this.plugins.mpegts instanceof window.mpegts.MSEPlayer) {
-                        this.plugins.mpegts.switchSecondaryAudio();
-                    // switch secondary audio for HLS
-                    } else if (window.Hls && this.plugins.hls && this.plugins.hls instanceof window.Hls) {
-                        const hls = this.plugins.hls;
-                        if (hls.audioTracks.length >= 2) {
-                            hls.audioTrack = 1;  // Switch to secondary audio track
-                        }
-                    }
-                } else {
-                    // switch primary audio for HLS
-                    if (window.Hls && this.plugins.hls && this.plugins.hls instanceof window.Hls) {
-                        const hls = this.plugins.hls;
-                        if (hls.audioTracks.length >= 2) {
-                            hls.audioTrack = 0;  // Switch to primary audio track
-                        }
-                    }
+                // Reapply immediately when metadata is ready, or leave the request for the audio event to consume
+                if (this.pendingAudio !== null) {
+                    this.switchAudio(this.pendingAudio);
                 }
 
                 this.container.classList.remove('dplayer-loading');
@@ -1285,6 +1419,16 @@ class DPlayer {
     }
 
     /**
+     * Release the media backend currently attached to the video element
+     */
+    destroyMediaBackend(): void {
+        // Clear the callback before running plugin code so reentrant teardown remains idempotent
+        const mediaBackendDestroy = this.mediaBackendDestroy;
+        this.mediaBackendDestroy = null;
+        mediaBackendDestroy?.();
+    }
+
+    /**
      * Destroy DPlayer, and it can not be used again
      * @param keepContainerInnerHTML If true, do not clean the innerHTML of the container
      */
@@ -1300,6 +1444,7 @@ class DPlayer {
         this.timer.destroy();
         this.setting.destroy();
         this.resizeObserver.disconnect();
+        this.destroyMediaBackend();
         this.video.removeAttribute('src');
         if (!keepContainerInnerHTML) {
             this.container.innerHTML = '';

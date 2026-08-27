@@ -5,7 +5,7 @@ declare class Setting {
     loop: boolean;
     showDanmaku: boolean;
     unlimitDanmaku: boolean;
-    currentAudio: 'primary' | 'secondary';
+    currentAudio: DPlayerType.AudioChannel;
     toneMappingMode: DPlayerType.ToneMappingMode;
     toneMappingModeBeforeComparison: DPlayerType.ToneMappingMode;
     resizeObserver: ResizeObserver;
@@ -13,6 +13,11 @@ declare class Setting {
     private updateToneMappingMode;
     setQualityItemVisible(index: number, visible: boolean): void;
     private syncQualityPanelHeight;
+    /**
+     * Reflect the selected broadcast audio channel in the settings UI
+     * @param audio Selected audio channel
+     */
+    setCurrentAudio(audio: DPlayerType.AudioChannel): void;
     hide(): void;
     show(): void;
     destroy(): void;

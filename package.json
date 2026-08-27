@@ -1,6 +1,6 @@
 {
     "name": "dplayer",
-    "version": "1.32.9",
+    "version": "1.33.1",
     "description": "Wow, such a lovely HTML5 danmaku video player",
     "main": "dist/DPlayer.min.js",
     "types": "dist/d.ts/index.d.ts",
@@ -72,6 +72,7 @@
         "hls.js": "^1.6.9",
         "mini-css-extract-plugin": "2.9.0",
         "minimatch": "^10.0.3",
+        "mpeg2toh264": "github:tsukumijima/mpeg2toh264#d14d5de43c7679915ec52772e9a14a4fa8f88bc8",
         "mpegts.js": "github:makeding/mmts.js#108ef6b1b7c8a539f9b3066a6e51599631e34ba9",
         "patch-package": "^7.0.2",
         "postcss": "^8.4.39",
