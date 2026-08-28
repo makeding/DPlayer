@@ -2,7 +2,7 @@
 
 ## Browser SDK ownership
 
-For `tlvdemux >= 0.3.2`, protocol and playback lifecycle behavior is owned by
+For `tlvdemux >= 0.3.3`, protocol and playback lifecycle behavior is owned by
 the public browser SDK. DPlayer must consume the SDK's MSE output pipeline,
 recorded-source and 16 MiB recorded-seek coordinator, track/layer selection,
 live input coalescing, playback-damage recovery, and Worker client/runtime.
@@ -34,6 +34,22 @@ recorded seek, and a reused MediaSource do not enable it. An explicit rainfall
 splice offset remains authoritative and is never compounded with a derived
 startup offset; an unmapped startup can read only the SDK's existing 16 MiB
 budget before reporting `MSE_STARTUP_NO_COMMON_AV`.
+
+Recorded media time uses tlvdemux's probed presentation range. Automatic
+dual-video playback uses the union start/end reported by the SDK; an explicit
+`videoPacketId` restricts the probe to that track. DPlayer passes the same
+presentation start/end to fresh MSE alignment, demuxer timestamp offset,
+duration, explicit seek, selected-layer damage recovery, audio switching, and
+running layer switching. Media time zero always maps to the probed presentation
+start; APIs that consume source presentation timestamps receive that origin
+exactly once.
+
+Before every sequential push, DPlayer reports the unchanged HTML media clock
+through `setMsePlaybackPosition`. Parser prefetch may retain a future damage
+authorization, but it cannot seek over healthy media before playback reaches
+the damaged span. Automatic recovery remains selected-layer-only, waits for a
+real media `waiting` event plus 0.5 seconds of common buffered A/V at the mapped
+recovery point, and executes once.
 
 For `video.type: "tlv"`, DPlayer consumes tlvdemux's `onPlaybackDamage`
 callback as the canonical source-damage signal.
