@@ -6,6 +6,18 @@ const MiB = 1024n * 1024n;
 const INITIAL_PROBE_SIZE = 2n * MiB;
 const MAX_PROBE_SIZE = 64n * MiB;
 
+export interface TLVRecordedPresentationRange {
+    durationUs: bigint;
+    presentationStartUs: bigint;
+    presentationEndUs: bigint;
+    selectedVideoPacketId: number | null;
+    presentationEndVideoPacketId: number | null;
+}
+
+function timestampMicroseconds(timestamp: {value: bigint | number; timescale: number}): bigint {
+    return BigInt(timestamp.value) * 1000000n / BigInt(timestamp.timescale);
+}
+
 export function openTLVRecordedSource(options: {
     url: string;
     fetchOptions?: Omit<RequestInit, 'signal' | 'headers'> & {headers?: HeadersInit};
@@ -26,10 +38,23 @@ export async function probeTLVRecordedDuration(options: {
     probe: WorkerDurationProbe;
     signal: AbortSignal;
     isActive: () => boolean;
-}): Promise<bigint> {
+    videoPacketId?: number | null;
+}): Promise<TLVRecordedPresentationRange> {
     const result = await probeRecordedDuration({
         ...options,
-        options: {initialRangeSize: INITIAL_PROBE_SIZE, maxRangeSize: MAX_PROBE_SIZE},
+        options: {
+            initialRangeSize: INITIAL_PROBE_SIZE,
+            maxRangeSize: MAX_PROBE_SIZE,
+            ...(options.videoPacketId === null || options.videoPacketId === undefined ? {} : {
+                videoPacketId: options.videoPacketId,
+            }),
+        },
     });
-    return BigInt(result.duration.value) * 1000000n / BigInt(result.duration.timescale);
+    return {
+        durationUs: timestampMicroseconds(result.duration),
+        presentationStartUs: timestampMicroseconds(result.presentationStart),
+        presentationEndUs: timestampMicroseconds(result.presentationEnd),
+        selectedVideoPacketId: result.selectedVideoPacketId,
+        presentationEndVideoPacketId: result.presentationEndVideoPacketId,
+    };
 }

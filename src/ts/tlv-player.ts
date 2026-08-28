@@ -23,6 +23,7 @@ import {createTLVDamageRecovery} from './tlv-damage-recovery';
 import {startTLVLayerSwitch, tlvPlaybackEntryKind} from './tlv-playback-entry';
 import {createTLVSubtitleRenderer, effectiveTLVToneMappingMode} from './tlv-presentation';
 import {openTLVRecordedSource, probeTLVRecordedDuration} from './tlv-recorded-source';
+import type {TLVRecordedPresentationRange} from './tlv-recorded-source';
 import {
     availableMptTracks,
     configureAutomaticTLVLayer,
@@ -92,6 +93,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private abortController: AbortController | null = null;
     private generation = 0;
     private durationUs: bigint | null = null;
+    private presentationStartUs = 0n;
+    private presentationEndUs: bigint | null = null;
+    private presentationStartVideoPacketId: number | null = null;
     private currentLayoutConfiguration: createTlvDemuxModule.LayoutConfiguration | null = null;
     private selectedTrackIds = new Map<createTlvDemuxModule.TrackKind, bigint>();
     private preferredVideoPacketId: number | null;
@@ -194,7 +198,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         try {
             // 候補音声は Worker 側ですでに継続して保持されている。ここで加える 100ms は
             // 読み込み待ちではなく、現在位置より少し先に splice 境界を置くための時間差だけ。
-            const earliestPresentationTimeUs = BigInt(Math.round((this.bridge.video.currentTime + 0.1) * 1000000));
+            const earliestPresentationTimeUs = this.presentationStartUs +
+                BigInt(Math.round((this.bridge.video.currentTime + 0.1) * 1000000));
             const boundary = await demuxer.switchAudioTrack(track.trackId, earliestPresentationTimeUs);
             if (this.audioSwitchError) throw this.audioSwitchError;
             if (this.demuxer !== demuxer || this.generation !== generation || this.destroyed) return;
@@ -303,7 +308,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         };
         this.layerSwitchPending = pending;
         try {
-            const earliestPresentationTimeUs = BigInt(
+            const mediaTimeUs = BigInt(
                 Math.round((this.bridge.video.currentTime + 0.1) * 1000000),
             );
             if (!await startTLVLayerSwitch({
@@ -311,7 +316,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 queuesReady: this.queueByType.has('video') && this.queueByType.has('audio'),
                 videoTrackId: videoTrack.trackId,
                 audioTrackId: audioTrack.trackId,
-                presentationTimeUs: earliestPresentationTimeUs,
+                mediaTimeUs,
+                presentationStartUs: this.presentationStartUs,
             })) {
                 throw new Error('The A/V layer switch could not be started.');
             }
@@ -506,7 +512,14 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                         `Recorded TLV size changed: expected ${this.bridge.source.fileSize}, received ${recordedSource.size}.`,
                     );
                 }
-                if (this.durationUs === null) this.durationUs = await this.probeDuration(recordedSource, controller.signal);
+                if (this.durationUs === null) {
+                    const presentation = await this.probeDuration(recordedSource, controller.signal);
+                    this.durationUs = presentation.durationUs;
+                    this.presentationStartUs = presentation.presentationStartUs;
+                    this.presentationEndUs = presentation.presentationEndUs;
+                    this.presentationStartVideoPacketId = presentation.selectedVideoPacketId;
+                    this.damageRecovery.setPresentationStartUs(this.presentationStartUs);
+                }
             }
             if (generation !== this.generation) return;
             await this.openMediaSource();
@@ -555,6 +568,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             media: this.bridge.video,
             queues: this.queueByType,
             freshRecordedEntryAlignment: entryKind === 'startup',
+            recordedPresentationStartUs: this.bridge.live ? null : this.presentationStartUs,
             onUpdateEnd: () => this.handleQueueUpdate(),
             onQueueCreated: () => this.handleQueueUpdate(),
             forceReinitialize: () => this.layerSwitchPending !== null,
@@ -574,6 +588,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             backBufferSeconds: this.bridge.options.backBufferSeconds ?? (this.bridge.live ? 45 : 8),
         });
 
+        const initialVideoPacketId = this.preferredVideoPacketId ?? this.presentationStartVideoPacketId;
         const callbacks: createTlvDemuxModule.TlvDemuxOptions = {
             onMseVideoProperties: properties => {
                 if (!active()) return;
@@ -668,7 +683,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 if (track_index === -1) this.tracks.push(track);
                 else this.tracks[track_index] = track;
                 if (track.kind === 'video' && !this.selectedTrackIds.has('video') &&
-                    (this.preferredVideoPacketId === null || track.packetId === this.preferredVideoPacketId)) {
+                    (initialVideoPacketId === null || track.packetId === initialVideoPacketId)) {
                     this.selectedTrackIds.set('video', track.trackId);
                 } else if (track.kind === 'audio' && !this.selectedTrackIds.has('audio') &&
                     (this.preferredAudioPacketId === null ? this.isMseCompatibleAudioTrack(track) :
@@ -822,11 +837,11 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
         };
         const demuxer = new this.worker!.TlvDemuxer(callbacks, {
-            videoPacketId: this.preferredVideoPacketId,
+            videoPacketId: initialVideoPacketId,
             audioPacketId: this.preferredAudioPacketId,
             subtitlePacketId: this.preferredSubtitlePacketId,
             mseMaxAudioChannels: 8,
-            indexDurationUs: this.durationUs,
+            indexDurationUs: this.presentationEndUs,
         });
         this.demuxer = demuxer;
         await demuxer.initialized();
@@ -844,6 +859,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // データ放送は通常字幕と文字スーパーを component_tag ごとに購読するため、
         // 画面字幕の選択とは独立して全 TTML track をイベントへ流す。
         await demuxer.setSubtitlePassthroughEnabled(true);
+        if (!this.bridge.live) await demuxer.setMseTimestampOffset(-this.presentationStartUs);
         if (!this.bridge.live) await demuxer.startIndex(false);
 
         let offset = 0n;
@@ -852,6 +868,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 targetTimeSeconds: startTimeSeconds,
                 source: recordedSource,
                 durationUs: this.durationUs,
+                presentationStartUs: this.presentationStartUs,
+                presentationEndUs: this.presentationEndUs ?? this.presentationStartUs + this.durationUs,
                 demuxer,
                 media: this.bridge.video,
                 queues: this.queueByType,
@@ -921,6 +939,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 maxDelayMilliseconds: LIVE_CHUNK_MAX_DELAY_MILLISECONDS,
             })) {
                 if (generation !== this.generation) break;
+                await demuxer.setMsePlaybackPosition(
+                    BigInt(Math.round(this.bridge.video.currentTime * 1000000)),
+                );
                 if (!await demuxer.push(data)) throw new Error('TLV live demux failed.');
                 if (callbackError) throw callbackError;
                 await flowControl.afterPush(data.byteLength, active);
@@ -929,6 +950,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             while (offset < recordedSource.size && generation === this.generation) {
                 const size = recordedSource.size - offset < CHUNK_SIZE ? recordedSource.size - offset : CHUNK_SIZE;
                 const data = await recordedSource.read(offset, size);
+                await demuxer.setMsePlaybackPosition(
+                    BigInt(Math.round(this.bridge.video.currentTime * 1000000)),
+                );
                 if (!await demuxer.push(data)) {
                     throw new Error(`TLV demux failed at ${offset}.`);
                 }
@@ -954,12 +978,13 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
     }
 
-    private probeDuration(source: RecordedSource, signal: AbortSignal): Promise<bigint> {
+    private probeDuration(source: RecordedSource, signal: AbortSignal): Promise<TLVRecordedPresentationRange> {
         return probeTLVRecordedDuration({
             source,
             probe: new this.worker!.DurationProbe(),
             signal,
             isActive: () => !this.destroyed,
+            videoPacketId: this.preferredVideoPacketId,
         });
     }
 

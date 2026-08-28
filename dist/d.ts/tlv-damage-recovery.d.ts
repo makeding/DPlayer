@@ -12,8 +12,9 @@ export declare function createTLVDamageRecovery(options: {
     switchInFlight: () => boolean;
     seek: (targetSeconds: number, previousTimeSeconds: number) => void;
 }): {
+    setPresentationStartUs(value: bigint): void;
     reportDamage(damage: createTlvDemuxModule.PlaybackDamage): boolean;
-    notifyWaiting: () => boolean;
+    notifyWaiting(): boolean;
     update: () => boolean;
     reset(): void;
 };

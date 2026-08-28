@@ -30,6 +30,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private abortController;
     private generation;
     private durationUs;
+    private presentationStartUs;
+    private presentationEndUs;
+    private presentationStartVideoPacketId;
     private currentLayoutConfiguration;
     private selectedTrackIds;
     private preferredVideoPacketId;

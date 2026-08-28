@@ -5,6 +5,7 @@ export declare function startTLVLayerSwitch(options: {
     queuesReady: boolean;
     videoTrackId: bigint;
     audioTrackId: bigint;
-    presentationTimeUs: bigint;
+    mediaTimeUs: bigint;
+    presentationStartUs: bigint;
 }): Promise<boolean>;
 //# sourceMappingURL=tlv-playback-entry.d.ts.map

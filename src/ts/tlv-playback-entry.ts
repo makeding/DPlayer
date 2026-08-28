@@ -10,14 +10,16 @@ export function startTLVLayerSwitch(options: {
     queuesReady: boolean;
     videoTrackId: bigint;
     audioTrackId: bigint;
-    presentationTimeUs: bigint;
+    mediaTimeUs: bigint;
+    presentationStartUs: bigint;
 }): Promise<boolean> {
     if (!options.queuesReady) {
         return options.demuxer.switchLayerAtPlaybackEntry(
-            options.videoTrackId, options.audioTrackId, options.presentationTimeUs,
+            options.videoTrackId, options.audioTrackId, options.mediaTimeUs,
         );
     }
     return options.demuxer.switchLayer(
-        options.videoTrackId, options.audioTrackId, options.presentationTimeUs,
+        options.videoTrackId, options.audioTrackId,
+        options.presentationStartUs + options.mediaTimeUs,
     );
 }

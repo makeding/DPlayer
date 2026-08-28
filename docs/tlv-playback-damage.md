@@ -65,10 +65,12 @@ callback as the canonical source-damage signal.
   waiting state for live playback or an unrecoverable-tail state for a
   recording. Warning-only intervals remain observable without interrupting the
   viewer.
-- DPlayer never renders TLV damage/error copy, creates a damage overlay, or
-  forwards these failures through its generic notice UI. The host application
-  owns presentation and consumes `tlv_playback_damage` / `tlv_error`; HonomiTV
-  routes them through its global Snackbar/Toast boundary.
+- DPlayer's TLV core never invents or automatically renders TLV damage/error
+  copy and never creates a damage overlay. The host application owns
+  presentation and consumes `tlv_playback_damage` / `tlv_error`; HonomiTV
+  generates the human-facing copy and explicitly displays it through the
+  current DPlayer instance's public `notice()` API (the lower-left in-player
+  notice). HonomiTV's global Snackbar/Toast is not used for TLV failures.
 - The host-facing event remains complete: UI ownership must not discard the
   damage action, severity, offsets, timestamps, recovery point, or stable error
   code. Human-facing copy names what failed, explains the consequence, and
@@ -77,8 +79,8 @@ callback as the canonical source-damage signal.
   layer. Restarting, seeking through the TLV loader, changing the video layer,
   switching source, or destroying the player clears it.
 - HonomiTV deduplicates repeated notifications from one playback generation so
-  a single damaged interval cannot stack multiple Snackbars. Restarting the
-  player starts a new notification generation.
+  a single damaged interval cannot repeatedly replace the in-player notice.
+  Restarting the player starts a new notification generation.
 
 Automatic rain-broadcast layer selection is a separate mechanism. A layer
 switch must not be reported as source-damage recovery, and source damage must

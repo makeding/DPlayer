@@ -10,7 +10,7 @@ import {
 
 const require = createRequire(import.meta.url);
 
-test('tlvdemux 0.3.1 live sources use the dedicated live playback entry', () => {
+test('tlvdemux 0.3.3 live sources use the dedicated live playback entry', () => {
     assert.equal(tlvPlaybackEntryKind(true, 0), 'live');
     assert.equal(tlvPlaybackEntryKind(false, 0), 'startup');
     assert.equal(tlvPlaybackEntryKind(false, 30), 'seek');
@@ -26,13 +26,14 @@ test('manual layer selection before MSE entry delegates to the public entry swit
         demuxer,
         videoTrackId: 1n,
         audioTrackId: 2n,
-        presentationTimeUs: 3000000n,
+        mediaTimeUs: 3000000n,
+        presentationStartUs: 2000000n,
     };
     assert.equal(await startTLVLayerSwitch({...request, queuesReady: false}), true);
     assert.equal(await startTLVLayerSwitch({...request, queuesReady: true}), true);
     assert.deepEqual(calls, [
         ['entry', 1n, 2n, 3000000n],
-        ['running', 1n, 2n, 3000000n],
+        ['running', 1n, 2n, 5000000n],
     ]);
 });
 

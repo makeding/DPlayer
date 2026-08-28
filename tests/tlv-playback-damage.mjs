@@ -18,7 +18,7 @@ const damage = overrides => ({
     ...overrides,
 });
 
-function fixture({currentTime = 10, video = [], audio = []} = {}) {
+function fixture({currentTime = 10, presentationStartUs = 0n, video = [], audio = []} = {}) {
     let videoRanges = video;
     let audioRanges = audio;
     const jumps = [];
@@ -47,6 +47,7 @@ function fixture({currentTime = 10, video = [], audio = []} = {}) {
             media.currentTime = target;
         },
     });
+    recovery.setPresentationStartUs(presentationStartUs);
     return {
         media,
         jumps,
@@ -65,6 +66,36 @@ test('damage report does not seek until the media element is waiting', () => {
     subject.recovery.notifyWaiting();
     assert.deepEqual(subject.jumps, [{target: 14.4, previous: 10}]);
     assert.equal(subject.media.playCount, 1);
+});
+
+test('non-zero presentation origin maps source timestamps to the HTML media clock once', () => {
+    const subject = fixture({
+        currentTime: 10,
+        presentationStartUs: 5000000n,
+        video: [{start: 0, end: 30}],
+        audio: [{start: 0, end: 30}],
+    });
+    subject.recovery.reportDamage(damage({
+        startTimeUs: 15000000n,
+        endTimeUs: 19400000n,
+        recoveryTimeUs: 19400000n,
+    }));
+    subject.recovery.notifyWaiting();
+    assert.deepEqual(subject.jumps, [{target: 14.4, previous: 10}]);
+});
+
+test('prefetched future damage cannot seek until playback reaches its damaged span', () => {
+    const subject = fixture({
+        currentTime: 2,
+        video: [{start: 0, end: 30}],
+        audio: [{start: 0, end: 30}],
+    });
+    subject.recovery.reportDamage(damage());
+    subject.recovery.notifyWaiting();
+    assert.deepEqual(subject.jumps, []);
+    subject.media.currentTime = 10;
+    subject.recovery.update();
+    assert.deepEqual(subject.jumps, [{target: 14.4, previous: 10}]);
 });
 
 test('waiting recovery requires common audio and video data after the recovery point', () => {
