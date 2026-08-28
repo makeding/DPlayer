@@ -14,6 +14,7 @@ import {coalesceReadableStream} from 'tlvdemux/stream-input';
 import {correspondingAudioTrack, sameVideoLayerGroup, selectionLevel} from 'tlvdemux/track-selection';
 import {createWorkerTlvDemuxModule} from 'tlvdemux/worker-client';
 import type {WorkerDemuxer, WorkerTlvDemuxModule} from 'tlvdemux/worker-client';
+import tlvDemuxRuntimeSource from 'tlvdemux-runtime-source?runtime-source';
 import InlineTlvWorker from 'worker-loader?inline=no-fallback!./tlv-worker-entry';
 
 import type * as DPlayerType from './types';
@@ -82,6 +83,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private readonly bridge: PlayerBridge;
     private worker: WorkerTlvDemuxModule | null = null;
+    private workerRuntimeUrl: string | null = null;
     private workerReady = false;
     private demuxer: Demuxer | null = null;
     private mediaSource: MediaSource | null = null;
@@ -435,6 +437,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.demuxer = null;
         this.worker?.close();
         this.worker = null;
+        if (this.workerRuntimeUrl) URL.revokeObjectURL(this.workerRuntimeUrl);
+        this.workerRuntimeUrl = null;
         this.renderer?.destroy();
         this.renderer = null;
         this.subtitleOverlay?.remove();
@@ -446,11 +450,21 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private async initialize(): Promise<void> {
         try {
             if (typeof Worker === 'undefined') throw new Error('This browser does not support Web Workers.');
-            this.worker = await createWorkerTlvDemuxModule({
+            this.workerRuntimeUrl = URL.createObjectURL(new Blob(
+                [tlvDemuxRuntimeSource],
+                {type: 'text/javascript'},
+            ));
+            const worker = await createWorkerTlvDemuxModule({
+                workerUrl: 'about:blank',
+                wasmUrl: this.workerRuntimeUrl,
                 workerFactory: () => new InlineTlvWorker(),
             });
+            if (this.destroyed) {
+                worker.close();
+                return;
+            }
+            this.worker = worker;
             this.workerReady = true;
-            if (this.destroyed) return;
             // WASM のロード中に要求された視聴履歴位置があれば、0 秒を経由せずその位置から開始する。
             const initialSeekTime = this.pendingSeekTime ?? 0;
             this.pendingSeekTime = null;
@@ -461,6 +475,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             this.workerReady = false;
             this.worker?.close();
             this.worker = null;
+            if (this.workerRuntimeUrl) URL.revokeObjectURL(this.workerRuntimeUrl);
+            this.workerRuntimeUrl = null;
             if (error instanceof DOMException && error.name === 'SecurityError') {
                 this.fail(new Error("TLV Worker was blocked by browser policy; allow blob: in Content-Security-Policy worker-src."));
             } else {
@@ -544,10 +560,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         let discardPlaybackData = startTimeSeconds > 0;
         let seekSession: MseRecordedSeekSession | null = null;
         const active = (): boolean => generation === this.generation && !this.destroyed;
+        const entryKind = tlvPlaybackEntryKind(this.bridge.live, startTimeSeconds);
         const pipeline = createMseOutputPipeline({
             mediaSource: this.mediaSource!,
             media: this.bridge.video,
             queues: this.queueByType,
+            freshRecordedEntryAlignment: entryKind === 'startup',
             onUpdateEnd: () => this.handleQueueUpdate(),
             onQueueCreated: () => this.handleQueueUpdate(),
             forceReinitialize: () => this.layerSwitchPending !== null,
@@ -559,7 +577,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const flowControl = createMsePlaybackFlowControl({
             media: this.bridge.video,
             queues: this.queueByType,
-            entryKind: tlvPlaybackEntryKind(this.bridge.live, startTimeSeconds),
+            entryKind,
             entryTimeSeconds: startTimeSeconds,
             highSeconds: this.bridge.options.forwardBufferSeconds ?? (this.bridge.live ? 8 : 15),
             lowSeconds: Math.min(8, this.bridge.options.forwardBufferSeconds ?? (this.bridge.live ? 8 : 15)),

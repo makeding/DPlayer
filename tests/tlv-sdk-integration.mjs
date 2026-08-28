@@ -1,8 +1,12 @@
 import assert from 'node:assert/strict';
 import {createRequire} from 'node:module';
+import {readFileSync, readdirSync} from 'node:fs';
 import test from 'node:test';
 
-import {startTLVLayerSwitch, tlvPlaybackEntryKind} from '../src/ts/tlv-playback-entry.ts';
+import {
+    startTLVLayerSwitch,
+    tlvPlaybackEntryKind,
+} from '../src/ts/tlv-playback-entry.ts';
 
 const require = createRequire(import.meta.url);
 
@@ -32,11 +36,24 @@ test('manual layer selection before MSE entry delegates to the public entry swit
     ]);
 });
 
-test('production and development builds emit readable stable tlvdemux asset names', () => {
+test('production and development builds embed the tlvdemux runtime without host sidecars', () => {
     for (const name of ['prod', 'dev']) {
         const config = require(`../webpack/${name}.config.js`);
-        const assetName = config.output.assetModuleFilename;
-        assert.equal(assetName({filename: '/node_modules/tlvdemux/dist/tlvdemux.js'}), 'tlvdemux.js');
-        assert.equal(assetName({filename: '/node_modules/tlvdemux/worker/demux-worker-runtime.js'}), 'tlvdemux-worker.js');
+        assert.equal(config.output.assetModuleFilename, undefined);
+        assert.ok(config.module.rules.some(rule =>
+            String(rule.resourceQuery) === String(/runtime-source/) && rule.type === 'asset/source'));
+        assert.ok(config.module.rules.some(rule =>
+            String(rule.test) === String(/tlvdemux\/worker-tlvdemux\.mjs$/) &&
+            String(rule.use).endsWith('/webpack/tlvdemux-worker-defaults-loader.cjs')));
     }
+});
+
+test('published bundle has no tlvdemux sidecar or build-machine dependency', () => {
+    const files = readdirSync(new URL('../dist/', import.meta.url));
+    const bundle = readFileSync(new URL('../dist/DPlayer.min.js', import.meta.url), 'utf8');
+    assert.deepEqual(files.filter(file => /^tlvdemux(?:-worker)?\.js$/.test(file)), []);
+    assert.doesNotMatch(bundle, /(?:\/|\\)tlvdemux(?:-worker)?\.js/);
+    assert.doesNotMatch(bundle, /\/Users\//);
+    assert.match(bundle, /createObjectURL/);
+    assert.match(bundle, /about:blank/);
 });

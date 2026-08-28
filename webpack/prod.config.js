@@ -24,12 +24,6 @@ module.exports = {
     output: {
         path: path.resolve(__dirname, '..', 'dist'),
         filename: '[name].min.js',
-        assetModuleFilename: pathData => {
-            const filename = pathData.filename || '';
-            if (filename.endsWith('/tlvdemux/dist/tlvdemux.js')) return 'tlvdemux.js';
-            if (filename.endsWith('/tlvdemux/worker/demux-worker-runtime.js')) return 'tlvdemux-worker.js';
-            return '[hash][ext][query]';
-        },
         library: '[name]',
         libraryTarget: 'umd',
         libraryExport: 'default',
@@ -64,6 +58,9 @@ module.exports = {
 
     // resolve modules
     resolve: {
+        alias: {
+            'tlvdemux-runtime-source': path.resolve(__dirname, '..', 'node_modules', 'tlvdemux', 'dist', 'tlvdemux.js'),
+        },
         extensions: ['.ts', '.js'],
     },
 
@@ -71,6 +68,14 @@ module.exports = {
     module: {
         strictExportPresence: true,
         rules: [
+            {
+                resourceQuery: /runtime-source/,
+                type: 'asset/source',
+            },
+            {
+                test: /tlvdemux\/worker-tlvdemux\.mjs$/,
+                use: path.resolve(__dirname, 'tlvdemux-worker-defaults-loader.cjs'),
+            },
             {
                 // compile TypeScript to JavaScript
                 test: /\.ts$/,

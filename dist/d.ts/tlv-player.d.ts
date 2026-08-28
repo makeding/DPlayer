@@ -21,6 +21,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     readonly tracks: DPlayerType.TLVTrackInfo[];
     private readonly bridge;
     private worker;
+    private workerRuntimeUrl;
     private workerReady;
     private demuxer;
     private mediaSource;

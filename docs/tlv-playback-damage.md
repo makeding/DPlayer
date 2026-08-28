@@ -2,7 +2,7 @@
 
 ## Browser SDK ownership
 
-For `tlvdemux >= 0.3.1`, protocol and playback lifecycle behavior is owned by
+For `tlvdemux >= 0.3.2`, protocol and playback lifecycle behavior is owned by
 the public browser SDK. DPlayer must consume the SDK's MSE output pipeline,
 recorded-source and 16 MiB recorded-seek coordinator, track/layer selection,
 live input coalescing, playback-damage recovery, and Worker client/runtime.
@@ -11,9 +11,9 @@ data-broadcast presentation, tone-mapping presentation, labels, and persisted
 preferences. Local copies, fallback readers, duplicate Worker protocols, and
 parallel Range/seek/MSE implementations are forbidden.
 
-Published browser assets use stable readable names: `DPlayer.min.js`,
-`tlvdemux-worker.js`, and `tlvdemux.js`. Content-hash-only filenames are not
-part of the DPlayer distribution contract.
+The published `DPlayer.min.js` is self-contained: it embeds the tlvdemux Worker
+and WASM JavaScript runtime and creates an owned Blob URL for Worker startup.
+Host applications must not copy, rename, or publish tlvdemux sidecar files.
 
 The cutover preserves the deployed DPlayer API and observable events. An
 explicit recorded seek must share the SDK's 16 MiB source-read budget and report
@@ -27,6 +27,13 @@ Live playback uses the SDK's dedicated Live entry. Its first valid common A/V
 range may start after timestamp zero; DPlayer aligns the media clock only after
 the configured Live startup buffer is ready. A Live stream that never forms a
 common A/V range must stop after the same 16 MiB no-progress budget.
+
+A fresh recorded playback from timestamp zero enables the SDK's atomic entry
+alignment before either SourceBuffer is installed. Live playback, an explicit
+recorded seek, and a reused MediaSource do not enable it. An explicit rainfall
+splice offset remains authoritative and is never compounded with a derived
+startup offset; an unmapped startup can read only the SDK's existing 16 MiB
+budget before reporting `MSE_STARTUP_NO_COMMON_AV`.
 
 For `video.type: "tlv"`, DPlayer consumes tlvdemux's `onPlaybackDamage`
 callback as the canonical source-damage signal.
