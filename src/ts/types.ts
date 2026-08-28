@@ -380,7 +380,7 @@ export interface VideoQuality {
 export interface TLVSourceOptions {
     /** Preferred MMTP video packet_id. The first HEVC track is used when omitted. */
     videoPacketId?: number;
-    /** Exact byte size of a recorded source. Avoids an additional size probe. */
+    /** Expected byte size of a recorded source. Playback rejects a changed source. */
     fileSize?: number;
 }
 

@@ -1,5 +1,33 @@
 # TLV playback damage contract
 
+## Browser SDK ownership
+
+For `tlvdemux >= 0.3.1`, protocol and playback lifecycle behavior is owned by
+the public browser SDK. DPlayer must consume the SDK's MSE output pipeline,
+recorded-source and 16 MiB recorded-seek coordinator, track/layer selection,
+live input coalescing, playback-damage recovery, and Worker client/runtime.
+DPlayer owns only its UI, product-mode transactions, public events, subtitle and
+data-broadcast presentation, tone-mapping presentation, labels, and persisted
+preferences. Local copies, fallback readers, duplicate Worker protocols, and
+parallel Range/seek/MSE implementations are forbidden.
+
+Published browser assets use stable readable names: `DPlayer.min.js`,
+`tlvdemux-worker.js`, and `tlvdemux.js`. Content-hash-only filenames are not
+part of the DPlayer distribution contract.
+
+The cutover preserves the deployed DPlayer API and observable events. An
+explicit recorded seek must share the SDK's 16 MiB source-read budget and report
+the SDK's seek-specific error; it must not fall back to an unbounded read or be
+reported as a startup failure. Manual rainfall selection followed by automatic
+selection must restore the healthy preferred paired A/V layer at the next
+usable RAP, including when the manual request was made before the initial
+playback entry.
+
+Live playback uses the SDK's dedicated Live entry. Its first valid common A/V
+range may start after timestamp zero; DPlayer aligns the media clock only after
+the configured Live startup buffer is ready. A Live stream that never forms a
+common A/V range must stop after the same 16 MiB no-progress budget.
+
 For `video.type: "tlv"`, DPlayer consumes tlvdemux's `onPlaybackDamage`
 callback as the canonical source-damage signal.
 

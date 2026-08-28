@@ -24,6 +24,12 @@ module.exports = {
     output: {
         path: path.resolve(__dirname, '..', 'dist'),
         filename: '[name].min.js',
+        assetModuleFilename: pathData => {
+            const filename = pathData.filename || '';
+            if (filename.endsWith('/tlvdemux/dist/tlvdemux.js')) return 'tlvdemux.js';
+            if (filename.endsWith('/tlvdemux/worker/demux-worker-runtime.js')) return 'tlvdemux-worker.js';
+            return '[hash][ext][query]';
+        },
         library: '[name]',
         libraryTarget: 'umd',
         libraryExport: 'default',

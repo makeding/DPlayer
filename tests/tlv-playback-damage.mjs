@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import test from 'node:test';
 
-import {createTlvPlaybackDamageRecovery} from '../src/ts/tlv-playback-damage.mjs';
+import {createTLVDamageRecovery} from '../src/ts/tlv-damage-recovery.ts';
 
 const damage = overrides => ({
     code: 'TLV_SOURCE_DAMAGE',
@@ -36,9 +36,12 @@ function fixture({currentTime = 10, video = [], audio = []} = {}) {
         ['video', {bufferedRanges: () => videoRanges}],
         ['audio', {bufferedRanges: () => audioRanges}],
     ]);
-    const recovery = createTlvPlaybackDamageRecovery({
+    const recovery = createTLVDamageRecovery({
         media,
         queues: () => queues,
+        isActive: () => true,
+        isCurrentLayer: event => event.videoTrackId === 10n,
+        switchInFlight: () => false,
         seek(target, previous) {
             jumps.push({target, previous});
             media.currentTime = target;
@@ -77,11 +80,11 @@ test('waiting recovery requires common audio and video data after the recovery p
     assert.deepEqual(subject.jumps, [{target: 14.4, previous: 10}]);
 });
 
-test('known damage overrides an optimistic continuous buffered range exactly once', () => {
+test('repeated pending damage still recovers the selected interval once', () => {
     const subject = fixture({video: [{start: 0, end: 30}], audio: [{start: 0, end: 30}]});
     const event = damage();
     assert.equal(subject.recovery.reportDamage(event), true);
-    assert.equal(subject.recovery.reportDamage(event), false);
+    assert.equal(subject.recovery.reportDamage(event), true);
     subject.recovery.notifyWaiting();
     subject.recovery.notifyWaiting();
     assert.deepEqual(subject.jumps, [{target: 14.4, previous: 10}]);
@@ -98,7 +101,7 @@ test('paused, seeking, warning, and wait-for-recovery states never jump', () => 
     subject.media.seeking = true;
     subject.recovery.update();
     assert.deepEqual(subject.jumps, []);
-    subject.recovery.clear();
+    subject.recovery.reset();
     subject.media.seeking = false;
     subject.recovery.update();
     assert.deepEqual(subject.jumps, []);

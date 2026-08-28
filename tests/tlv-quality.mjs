@@ -227,9 +227,10 @@ test('automatic selection returns to preferred and restores manual mode after co
     ]);
 });
 
-test('automatic layer configuration replaces stale pairs and clears missing pairs', async () => {
+test('automatic layer configuration delegates manual suspension and unavailable clearing to tlvdemux', async () => {
     const calls = [];
     const demuxer = {
+        suspendAutomaticLayerSwitch: async (...ids) => { calls.push(`suspend:${ids.map(String).join(':')}`); },
         clearAutomaticLayerSwitch: async () => { calls.push('clear'); },
         configureAutomaticLayerSwitch: async (...ids) => { calls.push(ids.map(String).join(':')); },
     };
@@ -240,8 +241,10 @@ test('automatic layer configuration replaces stale pairs and clears missing pair
     const signature = await configureAutomaticTLVLayer(demuxer, pair, null, false);
     assert.equal(signature, '1:3:2:4');
     assert.deepEqual(calls, ['1:3:2:4']);
-    assert.equal(await configureAutomaticTLVLayer(demuxer, null, signature, false), 'unavailable');
-    assert.deepEqual(calls, ['1:3:2:4', 'clear']);
+    assert.equal(await configureAutomaticTLVLayer(demuxer, pair, signature, true), 'disabled:1:3:2:4');
+    assert.deepEqual(calls, ['1:3:2:4', 'suspend:1:3:2:4']);
+    assert.equal(await configureAutomaticTLVLayer(demuxer, null, signature, true), 'disabled:unavailable');
+    assert.deepEqual(calls, ['1:3:2:4', 'suspend:1:3:2:4', 'clear']);
 });
 
 test('quality menu height counts only visible entries', () => {

@@ -1,3 +1,10 @@
+import {
+    configureAutomaticLayerPair,
+    currentMptTracks,
+    resolveLayerPair,
+} from 'tlvdemux/track-selection';
+import type {LayerPair, PlaybackTrack} from 'tlvdemux/track-selection';
+
 import type * as DPlayerType from './types';
 
 export interface TLVLayer {
@@ -14,9 +21,10 @@ export function availableMptTracks(
     snapshotTracks: readonly DPlayerType.TLVTrackInfo[],
     selectableTracks: readonly DPlayerType.TLVTrackInfo[],
 ): DPlayerType.TLVTrackInfo[] {
-    return snapshotTracks.filter(snapshotTrack => selectableTracks.some(selectable =>
-        selectable.kind === snapshotTrack.kind && selectable.trackId === snapshotTrack.trackId &&
-        selectable.packetId === snapshotTrack.packetId && selectable.contextId === snapshotTrack.contextId));
+    return currentMptTracks(
+        snapshotTracks as unknown as Iterable<PlaybackTrack>,
+        selectableTracks as unknown as Iterable<PlaybackTrack>,
+    ) as unknown as DPlayerType.TLVTrackInfo[];
 }
 
 export async function selectManualTLVLayer(
@@ -73,8 +81,14 @@ export async function selectAutomaticTLVLayer(options: {
     }
 }
 
-export async function configureAutomaticTLVLayer(
+export function configureAutomaticTLVLayer(
     demuxer: {
+        suspendAutomaticLayerSwitch(
+            preferredVideoTrackId: bigint,
+            preferredAudioTrackId: bigint,
+            fallbackVideoTrackId: bigint,
+            fallbackAudioTrackId: bigint,
+        ): Promise<void>;
         clearAutomaticLayerSwitch(): Promise<void>;
         configureAutomaticLayerSwitch(
             preferredVideoTrackId: bigint,
@@ -88,62 +102,12 @@ export async function configureAutomaticTLVLayer(
     manual: boolean,
     force = false,
 ): Promise<string> {
-    if (manual) {
-        if (force || previousSignature !== 'disabled') await demuxer.clearAutomaticLayerSwitch();
-        return 'disabled';
-    }
-    if (!pair?.fallback) {
-        if (force || previousSignature !== 'unavailable') await demuxer.clearAutomaticLayerSwitch();
-        return 'unavailable';
-    }
-    const signature = [
-        pair.preferred.video.trackId,
-        pair.preferred.audio.trackId,
-        pair.fallback.video.trackId,
-        pair.fallback.audio.trackId,
-    ].join(':');
-    if (force || signature !== previousSignature) {
-        await demuxer.configureAutomaticLayerSwitch(
-            pair.preferred.video.trackId, pair.preferred.audio.trackId,
-            pair.fallback.video.trackId, pair.fallback.audio.trackId,
-        );
-    }
-    return signature;
-}
-
-export function selectionLevel(
-    track: DPlayerType.TLVTrackInfo,
-    groupIdentification: number | null = null,
-): number | null {
-    const group = track.assetGroups.find(candidate =>
-        groupIdentification === null || candidate.groupIdentification === groupIdentification);
-    if (group) return group.selectionLevel;
-    return track.kind === 'video' && groupIdentification === null && track.assetGroups.length === 0 ? 0 : null;
-}
-
-export function sameVideoLayerGroup(
-    left: DPlayerType.TLVTrackInfo,
-    right: DPlayerType.TLVTrackInfo,
-): boolean {
-    if (left.kind !== 'video' || right.kind !== 'video' || left.contextId !== right.contextId) return false;
-    if (!left.assetGroups.length || !right.assetGroups.length) return true;
-    return left.assetGroups.some(leftGroup => right.assetGroups.some(rightGroup =>
-        leftGroup.groupIdentification === rightGroup.groupIdentification));
-}
-
-function correspondingAudioTrack(
-    tracks: readonly DPlayerType.TLVTrackInfo[],
-    current: DPlayerType.TLVTrackInfo,
-    targetLevel: number | null,
-): DPlayerType.TLVTrackInfo | null {
-    if (targetLevel === null) return null;
-    const groupIds = current.assetGroups.map(group => group.groupIdentification);
-    for (const groupId of groupIds) {
-        const track = tracks.find(candidate => candidate.kind === 'audio' && candidate.assetGroups.some(group =>
-            group.groupIdentification === groupId && group.selectionLevel === targetLevel));
-        if (track) return track;
-    }
-    return null;
+    return configureAutomaticLayerPair(
+        demuxer as unknown as Parameters<typeof configureAutomaticLayerPair>[0],
+        pair as unknown as LayerPair,
+        previousSignature,
+        {manual, force},
+    );
 }
 
 export function resolveTLVLayerPair(
@@ -151,21 +115,9 @@ export function resolveTLVLayerPair(
     currentVideo: DPlayerType.TLVTrackInfo,
     currentAudio: DPlayerType.TLVTrackInfo,
 ): TLVLayerPair | null {
-    const videos = tracks
-        .filter(track => sameVideoLayerGroup(currentVideo, track))
-        .sort((left, right) =>
-            (selectionLevel(left) ?? 0xff) - (selectionLevel(right) ?? 0xff));
-    const preferredVideo = videos[0];
-    if (!preferredVideo) return null;
-    const preferredLevel = selectionLevel(preferredVideo);
-    const preferredAudio = correspondingAudioTrack(tracks, currentAudio, preferredLevel);
-    if (!preferredAudio) return null;
-    const fallbackVideo = videos.find(track =>
-        selectionLevel(track) !== null && selectionLevel(track)! > (preferredLevel ?? 0xff));
-    const fallbackLevel = fallbackVideo ? selectionLevel(fallbackVideo) : null;
-    const fallbackAudio = fallbackVideo ? correspondingAudioTrack(tracks, currentAudio, fallbackLevel) : null;
-    return {
-        preferred: {video: preferredVideo, audio: preferredAudio},
-        fallback: fallbackVideo && fallbackAudio ? {video: fallbackVideo, audio: fallbackAudio} : null,
-    };
+    return resolveLayerPair(
+        tracks as unknown as Iterable<PlaybackTrack>,
+        currentVideo as unknown as PlaybackTrack,
+        currentAudio as unknown as PlaybackTrack,
+    ) as unknown as TLVLayerPair | null;
 }

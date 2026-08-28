@@ -21,10 +21,9 @@ export declare function selectAutomaticTLVLayer(options: {
     disableAutomatic: () => Promise<void>;
 }): Promise<void>;
 export declare function configureAutomaticTLVLayer(demuxer: {
+    suspendAutomaticLayerSwitch(preferredVideoTrackId: bigint, preferredAudioTrackId: bigint, fallbackVideoTrackId: bigint, fallbackAudioTrackId: bigint): Promise<void>;
     clearAutomaticLayerSwitch(): Promise<void>;
     configureAutomaticLayerSwitch(preferredVideoTrackId: bigint, preferredAudioTrackId: bigint, fallbackVideoTrackId: bigint, fallbackAudioTrackId: bigint): Promise<void>;
 }, pair: TLVLayerPair | null, previousSignature: string | null, manual: boolean, force?: boolean): Promise<string>;
-export declare function selectionLevel(track: DPlayerType.TLVTrackInfo, groupIdentification?: number | null): number | null;
-export declare function sameVideoLayerGroup(left: DPlayerType.TLVTrackInfo, right: DPlayerType.TLVTrackInfo): boolean;
 export declare function resolveTLVLayerPair(tracks: readonly DPlayerType.TLVTrackInfo[], currentVideo: DPlayerType.TLVTrackInfo, currentAudio: DPlayerType.TLVTrackInfo): TLVLayerPair | null;
 //# sourceMappingURL=tlv-layer-selection.d.ts.map

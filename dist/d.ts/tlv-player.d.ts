@@ -25,14 +25,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private demuxer;
     private mediaSource;
     private mediaUrl;
-    private queues;
     private queueByType;
     private renderer;
     private readonly hlgSdrRenderer;
     private subtitleOverlay;
     private abortController;
     private generation;
-    private sourceSize;
     private durationUs;
     private currentLayoutConfiguration;
     private selectedTrackIds;
@@ -85,9 +83,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private restart;
     private openMediaSource;
     private consumeSource;
-    private discoverSourceSize;
+    private openRecordedSource;
     private probeDuration;
-    private fetchRange;
     private fetch;
     private createSubtitleRenderer;
     private updateHlgSdrRenderer;
@@ -98,8 +95,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private showDamageNotice;
     private clearDamageNotice;
     private resetPlaybackDamage;
-    private applyBackpressure;
-    private bufferedAhead;
     private isMseCompatibleAudioTrack;
     private configureAutomaticLayerSwitch;
     private subtitleTrackKind;
