@@ -45,20 +45,24 @@ callback as the canonical source-damage signal.
   only after the media element emits `waiting`, the user is not paused or
   seeking, and at least 0.5 seconds of common audio/video data is buffered at
   the recovery point.
-- A severe interval without a recovery point remains visible as an honest
+- A severe interval without a recovery point remains observable as an honest
   waiting state for live playback or an unrecoverable-tail state for a
   recording. Warning-only intervals remain observable without interrupting the
   viewer.
-- User-facing copy stays brief: it names the damaged recording or stream, says
-  whether playback will skip, wait, or stop, and preserves the stable error
-  code. It never names DPlayer or exposes buffering and recovery internals.
+- DPlayer never renders TLV damage/error copy, creates a damage overlay, or
+  forwards these failures through its generic notice UI. The host application
+  owns presentation and consumes `tlv_playback_damage` / `tlv_error`; HonomiTV
+  routes them through its global Snackbar/Toast boundary.
+- The host-facing event remains complete: UI ownership must not discard the
+  damage action, severity, offsets, timestamps, recovery point, or stable error
+  code. Human-facing copy names what failed, explains the consequence, and
+  gives the next action without exposing buffering and recovery internals.
 - Damage state is scoped to one TLV playback generation and selected video
   layer. Restarting, seeking through the TLV loader, changing the video layer,
   switching source, or destroying the player clears it.
-- The damage notice has an always-allocated, non-interactive overlay slot.
-  Empty, warning, recoverable, waiting, recovered, and terminal states do not
-  move the video, subtitles, controller, or focus targets. The recovered state
-  clears the slot's text after playback has resumed.
+- HonomiTV deduplicates repeated notifications from one playback generation so
+  a single damaged interval cannot stack multiple Snackbars. Restarting the
+  player starts a new notification generation.
 
 Automatic rain-broadcast layer selection is a separate mechanism. A layer
 switch must not be reported as source-damage recovery, and source damage must

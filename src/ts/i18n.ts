@@ -83,10 +83,6 @@ const tranTxt = {
         'Select the quality again to retry.': '请再次选择该画质重试。',
         'Switched to rain broadcast because the broadcast stream was damaged.': '检测到广播流损坏，已切换到降雨放送。',
         'Returned to the primary broadcast.': '已返回主放送。',
-        'Recording damaged. If playback stops, it will skip ahead {{seconds}} seconds. [TLV_SOURCE_DAMAGE]': '录制数据损坏，播放中断时将跳到 {{seconds}} 秒后的恢复点。 [TLV_SOURCE_DAMAGE]',
-        'Stream damaged. Waiting for recovery. [TLV_SOURCE_DAMAGE]': '接收流损坏，等待恢复中。 [TLV_SOURCE_DAMAGE]',
-        'Recording tail damaged. Cannot continue; return to an earlier position. [TLV_SOURCE_DAMAGE]': '录制末尾损坏，无法继续播放。请返回之前的位置。 [TLV_SOURCE_DAMAGE]',
-        'Playback recovered. [TLV_SOURCE_DAMAGE]': '播放已恢复。 [TLV_SOURCE_DAMAGE]',
     },
     'zh-tw': {
         'Danmaku is loading': '彈幕載入中',
@@ -146,10 +142,6 @@ const tranTxt = {
         'Select the quality again to retry.': '請再次選擇該畫質重試。',
         'Switched to rain broadcast because the broadcast stream was damaged.': '偵測到廣播串流損壞，已切換到降雨放送。',
         'Returned to the primary broadcast.': '已返回主要放送。',
-        'Recording damaged. If playback stops, it will skip ahead {{seconds}} seconds. [TLV_SOURCE_DAMAGE]': '錄製資料損壞，播放中斷時將跳到 {{seconds}} 秒後的復原點。 [TLV_SOURCE_DAMAGE]',
-        'Stream damaged. Waiting for recovery. [TLV_SOURCE_DAMAGE]': '接收串流損壞，等待復原中。 [TLV_SOURCE_DAMAGE]',
-        'Recording tail damaged. Cannot continue; return to an earlier position. [TLV_SOURCE_DAMAGE]': '錄製尾端損壞，無法繼續播放。請返回先前的位置。 [TLV_SOURCE_DAMAGE]',
-        'Playback recovered. [TLV_SOURCE_DAMAGE]': '播放已復原。 [TLV_SOURCE_DAMAGE]',
     },
     'ja-jp': {
         'Danmaku is loading': 'コメントを読み込み中…',
@@ -208,10 +200,6 @@ const tranTxt = {
         'Select the quality again to retry.': 'もう一度画質を選択して再試行してください。',
         'Switched to rain broadcast because the broadcast stream was damaged.': '受信した放送ストリームが不連続なため、降雨放送に切り替えました。',
         'Returned to the primary broadcast.': '通常放送に戻りました。',
-        'Recording damaged. If playback stops, it will skip ahead {{seconds}} seconds. [TLV_SOURCE_DAMAGE]': '録画データが破損しています。停止時は{{seconds}}秒先へ移動します。 [TLV_SOURCE_DAMAGE]',
-        'Stream damaged. Waiting for recovery. [TLV_SOURCE_DAMAGE]': '受信データが破損しています。復旧待ちです。 [TLV_SOURCE_DAMAGE]',
-        'Recording tail damaged. Cannot continue; return to an earlier position. [TLV_SOURCE_DAMAGE]': '録画末尾が破損しているため、再生できません。前の位置へ戻ってください。 [TLV_SOURCE_DAMAGE]',
-        'Playback recovered. [TLV_SOURCE_DAMAGE]': '再生を復旧しました。 [TLV_SOURCE_DAMAGE]',
     },
 };
 

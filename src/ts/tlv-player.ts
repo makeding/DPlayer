@@ -56,11 +56,8 @@ type PlayerBridge = {
     options: DPlayerType.TLVOptions;
     subtitleOptions?: aribb62js.B62TTMLRendererOptions;
     subtitleVisible: () => boolean;
-    damageNotice: HTMLElement;
-    translate: (text: string) => string;
     invalidateQualitySnapshot: () => void;
     emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
-    notice: (message: string) => void;
 };
 
 type LayerSwitchRequest = {
@@ -120,9 +117,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private readonly damageRecovery;
     private readonly reportedDamage = new Set<string>();
     private readonly waitingListener = (): void => { this.damageRecovery.notifyWaiting(); };
-    private readonly playingListener = (): void => {
-        if (this.bridge.damageNotice.dataset.state === 'recovered') this.clearDamageNotice();
-    };
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
@@ -136,13 +130,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             switchInFlight: () => this.layerSwitchPending !== null,
             seek: target => {
                 bridge.video.currentTime = target;
-                this.showDamageNotice('recovered', bridge.translate(
-                    'Playback recovered. [TLV_SOURCE_DAMAGE]',
-                ));
             },
         });
         bridge.video.addEventListener('waiting', this.waitingListener);
-        bridge.video.addEventListener('playing', this.playingListener);
         void this.initialize();
     }
 
@@ -429,7 +419,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.rejectLayerSwitch(new DOMException('TLV playback was destroyed.', 'AbortError'));
         this.destroyed = true;
         this.bridge.video.removeEventListener('waiting', this.waitingListener);
-        this.bridge.video.removeEventListener('playing', this.playingListener);
         this.resetPlaybackDamage();
         this.generation += 1;
         this.abortController?.abort();
@@ -1041,38 +1030,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
         if (damage.action === 'seek' && damage.recoveryTimeUs !== null) {
             this.damageRecovery.reportDamage(damage);
-            const start = Number(damage.startTimeUs ?? damage.endTimeUs) / 1000000;
-            const recovery = Number(damage.recoveryTimeUs) / 1000000;
-            const seconds = Math.max(0, recovery - start).toFixed(1);
-            const message = this.bridge.translate(
-                'Recording damaged. If playback stops, it will skip ahead {{seconds}} seconds. [TLV_SOURCE_DAMAGE]',
-            )
-                .replace('{{seconds}}', seconds);
-            this.showDamageNotice('recoverable', message);
-        } else if (damage.action === 'wait-for-recovery') {
-            this.showDamageNotice(
-                this.bridge.live ? 'waiting' : 'terminal',
-                this.bridge.translate(this.bridge.live ?
-                    'Stream damaged. Waiting for recovery. [TLV_SOURCE_DAMAGE]' :
-                    'Recording tail damaged. Cannot continue; return to an earlier position. [TLV_SOURCE_DAMAGE]'),
-            );
         }
-    }
-
-    private showDamageNotice(state: 'recoverable' | 'waiting' | 'terminal' | 'recovered', message: string): void {
-        this.bridge.damageNotice.dataset.state = state;
-        this.bridge.damageNotice.textContent = message;
-    }
-
-    private clearDamageNotice(): void {
-        this.bridge.damageNotice.dataset.state = 'empty';
-        this.bridge.damageNotice.textContent = '';
     }
 
     private resetPlaybackDamage(): void {
         this.damageRecovery.reset();
         this.reportedDamage.clear();
-        this.clearDamageNotice();
     }
 
     private isMseCompatibleAudioTrack(track: DPlayerType.TLVTrackInfo): boolean {
@@ -1121,7 +1084,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const normalized = error instanceof Error ? error : new Error(String(error));
         this.rejectLayerSwitch(normalized);
         this.bridge.emit('tlv_error', normalized);
-        this.bridge.notice(normalized.message);
     }
 
     private rejectLayerSwitch(error: Error): void {

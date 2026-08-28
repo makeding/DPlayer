@@ -16,7 +16,6 @@ declare class Template {
     playedBarTime: HTMLElement;
     danmaku: HTMLElement;
     danmakuLoading: HTMLElement;
-    tlvPlaybackDamage: HTMLElement;
     video: HTMLVideoElement;
     bezel: HTMLElement;
     playButton: HTMLElement;

@@ -847,8 +847,6 @@ class DPlayer {
                         subtitleOptions: this.options.pluginOptions.aribb62,
                         subtitleVisible: () => this.user.get('subtitle') !== 0 &&
                             !this.template.subtitle.classList.contains('dplayer-subtitle-hide'),
-                        damageNotice: this.template.tlvPlaybackDamage,
-                        translate: this.tran,
                         invalidateQualitySnapshot: () => this.tlvQuality?.invalidateSnapshot(),
                         emit: (name, detail) => {
                             if (name === 'tlv_tracks') {
@@ -870,7 +868,6 @@ class DPlayer {
                             }
                             this.events.trigger(name, detail);
                         },
-                        notice: message => this.notice(`Error: ${message}`, undefined, undefined, '#FF6F6A'),
                     });
                     this.plugins.tlv = tlvPlayer;
                     if (this.tlvOutputEdid) tlvPlayer.setOutputEdid(this.tlvOutputEdid);

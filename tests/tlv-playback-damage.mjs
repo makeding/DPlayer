@@ -106,13 +106,3 @@ test('paused, seeking, warning, and wait-for-recovery states never jump', () => 
     subject.recovery.update();
     assert.deepEqual(subject.jumps, []);
 });
-
-test('public damage copy stays concise and does not name the player implementation', async () => {
-    const source = await import('node:fs/promises').then(fs => fs.readFile(
-        new URL('../src/ts/i18n.ts', import.meta.url), 'utf8'));
-    const messages = [...source.matchAll(/'([^'\n]*\[TLV_SOURCE_DAMAGE\])'/g)]
-        .map(match => match[1]);
-    assert.ok(messages.length >= 12);
-    assert.equal(messages.some(message => message.includes('DPlayer')), false);
-    assert.equal(messages.every(message => message.length <= 100), true);
-});

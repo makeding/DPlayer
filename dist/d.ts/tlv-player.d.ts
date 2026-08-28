@@ -10,11 +10,8 @@ type PlayerBridge = {
     options: DPlayerType.TLVOptions;
     subtitleOptions?: aribb62js.B62TTMLRendererOptions;
     subtitleVisible: () => boolean;
-    damageNotice: HTMLElement;
-    translate: (text: string) => string;
     invalidateQualitySnapshot: () => void;
     emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
-    notice: (message: string) => void;
 };
 /** Browser MMT/TLV loader, demuxer, MSE bridge, subtitle renderer and receiver host. */
 export default class TLVPlayer implements DPlayerType.TLVPlugin {
@@ -58,7 +55,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private readonly damageRecovery;
     private readonly reportedDamage;
     private readonly waitingListener;
-    private readonly playingListener;
     constructor(bridge: PlayerBridge);
     layerPair(tracks?: readonly DPlayerType.TLVTrackInfo[]): DPlayerType.TLVLayerPair | null;
     seek(time: number): Promise<void>;
@@ -93,8 +89,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private maybeStartPlayback;
     private handleQueueUpdate;
     private handlePlaybackDamage;
-    private showDamageNotice;
-    private clearDamageNotice;
     private resetPlaybackDamage;
     private isMseCompatibleAudioTrack;
     private configureAutomaticLayerSwitch;

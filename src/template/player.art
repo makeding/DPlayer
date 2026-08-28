@@ -3,7 +3,6 @@
     <div class="dplayer-video-wrap-aspect">
       {{ include './video.art' video }}
       <div class="dplayer-tlv-media-plane"></div>
-      <div class="dplayer-tlv-playback-damage" data-state="empty" role="status" aria-live="polite"></div>
     </div>
     {{ if options.logo }}
     <div class="dplayer-logo">

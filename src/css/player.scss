@@ -29,42 +29,6 @@
         z-index: 2;
     }
 
-    // This slot is permanently allocated in the video overlay. Changing the
-    // damage state never reflows the video, subtitles, controls, or focus graph.
-    .dplayer-tlv-playback-damage {
-        position: absolute;
-        z-index: 3;
-        top: 16px;
-        left: 50%;
-        width: min(760px, calc(100% - 32px));
-        box-sizing: border-box;
-        min-height: 18px;
-        padding: 9px 12px;
-        transform: translateX(-50%);
-        border-radius: 4px;
-        color: #fff;
-        font-size: 14px;
-        line-height: 1.45;
-        text-align: center;
-        text-shadow: 0 1px 2px #000;
-        pointer-events: none;
-
-        &[data-state='empty'] {
-            padding-top: 0;
-            padding-bottom: 0;
-        }
-
-        &[data-state='recoverable'],
-        &[data-state='waiting'],
-        &[data-state='terminal'] {
-            background: rgb(132 48 24 / 88%);
-        }
-
-        &[data-state='recovered'] {
-            background: rgb(21 96 61 / 88%);
-        }
-    }
-
     &.dplayer-fulled, &.dplayer-fulled-browser {
         width: 100% !important;
         height: 100% !important;
