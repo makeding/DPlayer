@@ -1,14 +1,23 @@
 import * as aribb62js from 'aribb62.js';
 import type createTlvDemuxModule from 'tlvdemux';
 import type {MseAppendQueue} from 'tlvdemux/mse-append-queue';
-import {createMseOutputPipeline} from 'tlvdemux/mse-output-pipeline';
+import {createMseOutputPipeline, setMseVideoTrackActive} from 'tlvdemux/mse-output-pipeline';
 import type {MseOutputPipeline} from 'tlvdemux/mse-output-pipeline';
+import {createLiveMseTransitionManager} from 'tlvdemux/mse-live-transition';
+import type {MseLiveTransitionCommit, MseLiveTransitionManager} from 'tlvdemux/mse-live-transition';
 import {
+    MsePlaybackMode,
     createMsePlaybackFlowControl,
+    createMsePlaybackResilienceController,
     createMseRecordedSeekSession,
     startMsePlayback,
 } from 'tlvdemux/mse-playback';
-import type {MseRecordedSeekSession} from 'tlvdemux/mse-playback';
+import type {
+    MsePlaybackFlowControl,
+    MsePlaybackModeChange,
+    MsePlaybackResilienceController,
+    MseRecordedSeekSession,
+} from 'tlvdemux/mse-playback';
 import type {RecordedSource} from 'tlvdemux/recorded-source';
 import {coalesceReadableStream} from 'tlvdemux/stream-input';
 import {correspondingAudioTrack, sameVideoLayerGroup, selectionLevel} from 'tlvdemux/track-selection';
@@ -19,11 +28,18 @@ import InlineTlvWorker from 'worker-loader?inline=no-fallback!./tlv-worker-entry
 
 import type * as DPlayerType from './types';
 import HlgSdrRenderer from './hlg-sdr-player-renderer';
-import {createTLVDamageRecovery} from './tlv-damage-recovery';
+import {
+    createTLVDynamicMedia,
+    openDetachedTLVMediaSource,
+    promoteTLVMedia,
+    restoreTLVMedia,
+} from './tlv-media-session';
 import {startTLVLayerSwitch, tlvPlaybackEntryKind} from './tlv-playback-entry';
+import {applyTLVRequiredTracks, requestTLVAudioOnlyTransition} from './tlv-playback-transition';
 import {createTLVSubtitleRenderer, effectiveTLVToneMappingMode} from './tlv-presentation';
 import {openTLVRecordedSource, probeTLVRecordedDuration} from './tlv-recorded-source';
 import type {TLVRecordedPresentationRange} from './tlv-recorded-source';
+import {adoptRecordedTLVDemuxer, createRecordedTLVTransitionManager} from './tlv-recorded-transition';
 import {
     availableMptTracks,
     configureAutomaticTLVLayer,
@@ -57,6 +73,9 @@ type PlayerBridge = {
     options: DPlayerType.TLVOptions;
     subtitleOptions?: aribb62js.B62TTMLRendererOptions;
     subtitleVisible: () => boolean;
+    canRebindMedia: (previous: HTMLVideoElement) => boolean;
+    rebindMedia: (candidate: HTMLVideoElement, previous: HTMLVideoElement) => void;
+    restoreMedia: (previous: HTMLVideoElement, candidate: HTMLVideoElement) => void;
     invalidateQualitySnapshot: () => void;
     emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
 };
@@ -70,6 +89,15 @@ type LayerSwitchRequest = {
     reject: (error: Error) => void;
 };
 
+type TransitionCandidate = MseLiveTransitionCommit & {
+    seekResult?: {nextOffset: bigint};
+    prepareDemuxerAdoption?: (callbacks: createTlvDemuxModule.TlvDemuxOptions) => {
+        demuxer: WorkerDemuxer;
+        tracks: createTlvDemuxModule.TrackInfo[];
+        commit(): void;
+    };
+};
+
 function timestampMilliseconds(value: bigint | null, timescale: number | null): number | undefined {
     if (value === null || timescale === null || !(timescale > 0)) return undefined;
     return Number(value) * 1000 / timescale;
@@ -80,6 +108,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     readonly tracks: DPlayerType.TLVTrackInfo[] = [];
 
     private readonly bridge: PlayerBridge;
+    private media: HTMLVideoElement;
     private worker: WorkerTlvDemuxModule | null = null;
     private workerRuntimeUrl: string | null = null;
     private workerReady = false;
@@ -118,25 +147,32 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private pendingOutputEdid: Uint8Array | null = null;
     private pendingOutputConnected: boolean | null = null;
     private videoProperties: createTlvDemuxModule.MseVideoProperties | null = null;
-    private readonly damageRecovery;
-    private readonly reportedDamage = new Set<string>();
-    private readonly waitingListener = (): void => { this.damageRecovery.notifyWaiting(); };
+    private readonly dynamicMedia;
+    private msePipeline: MseOutputPipeline | null = null;
+    private playbackFlow: MsePlaybackFlowControl | null = null;
+    private resilience: MsePlaybackResilienceController | null = null;
+    private liveTransition: MseLiveTransitionManager | null = null;
+    private recordedTransition: MseLiveTransitionManager | null = null;
+    private transitionFactory: (() => void) | null = null;
+    private readonly waitingListener = (): void => { this.resilience?.notifyWaiting(); };
+    private readonly pauseListener = (): void => {
+        this.resilience?.notifyPlaybackPaused();
+        this.liveTransition?.notifyPlaybackPaused();
+        this.recordedTransition?.notifyPlaybackPaused();
+    };
+    private readonly playListener = (): void => {
+        this.resilience?.notifyPlaybackResumed();
+        this.liveTransition?.notifyPlaybackResumed();
+        this.recordedTransition?.notifyPlaybackResumed();
+    };
 
     constructor(bridge: PlayerBridge) {
         this.bridge = bridge;
+        this.media = bridge.video;
         this.preferredVideoPacketId = bridge.source.videoPacketId ?? null;
+        this.dynamicMedia = createTLVDynamicMedia(() => this.media);
         this.hlgSdrRenderer = new HlgSdrRenderer(bridge.video, bridge.mediaPlane);
-        this.damageRecovery = createTLVDamageRecovery({
-            media: bridge.video,
-            queues: () => this.queueByType,
-            isActive: () => !this.destroyed,
-            isCurrentLayer: damage => damage.videoTrackId === this.selectedTrackIds.get('video'),
-            switchInFlight: () => this.layerSwitchPending !== null,
-            seek: target => {
-                bridge.video.currentTime = target;
-            },
-        });
-        bridge.video.addEventListener('waiting', this.waitingListener);
+        this.bindMediaLifecycle(bridge.video);
         void this.initialize();
     }
 
@@ -170,7 +206,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         const track = this.trackByPacket('video', packetId);
         if (!track || !this.demuxer) return;
         const demuxer = this.demuxer;
-        this.resetPlaybackDamage();
+        this.cancelPlaybackTransition();
+        this.resilience?.notifyTrackSwitch(this.generation);
         this.selectedTrackIds.set('video', track.trackId);
         void demuxer.selectTrack('video', track.trackId).catch(error => {
             if (this.demuxer === demuxer && !this.destroyed) this.fail(error);
@@ -192,6 +229,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             throw new Error('Audio playback is not ready yet. Wait for playback to start and try again.');
         }
 
+        this.cancelPlaybackTransition();
+        this.resilience?.notifyTrackSwitch(this.generation);
         this.audioSwitchPending = true;
         this.audioSwitchError = null;
         const generation = this.generation;
@@ -199,7 +238,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             // 候補音声は Worker 側ですでに継続して保持されている。ここで加える 100ms は
             // 読み込み待ちではなく、現在位置より少し先に splice 境界を置くための時間差だけ。
             const earliestPresentationTimeUs = this.presentationStartUs +
-                BigInt(Math.round((this.bridge.video.currentTime + 0.1) * 1000000));
+                BigInt(Math.round((this.media.currentTime + 0.1) * 1000000));
             const boundary = await demuxer.switchAudioTrack(track.trackId, earliestPresentationTimeUs);
             if (this.audioSwitchError) throw this.audioSwitchError;
             if (this.demuxer !== demuxer || this.generation !== generation || this.destroyed) return;
@@ -292,6 +331,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         audioTrack: DPlayerType.TLVTrackInfo,
     ): Promise<void> {
 
+        this.cancelPlaybackTransition();
+        this.resilience?.notifyTrackSwitch(this.generation);
         let resolveCompletion!: () => void;
         let rejectCompletion!: (error: Error) => void;
         const completion = new Promise<void>((resolve, reject) => {
@@ -309,7 +350,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.layerSwitchPending = pending;
         try {
             const mediaTimeUs = BigInt(
-                Math.round((this.bridge.video.currentTime + 0.1) * 1000000),
+                Math.round((this.media.currentTime + 0.1) * 1000000),
             );
             if (!await startTLVLayerSwitch({
                 demuxer,
@@ -424,8 +465,8 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (this.destroyed) return;
         this.rejectLayerSwitch(new DOMException('TLV playback was destroyed.', 'AbortError'));
         this.destroyed = true;
-        this.bridge.video.removeEventListener('waiting', this.waitingListener);
-        this.resetPlaybackDamage();
+        this.unbindMediaLifecycle(this.media);
+        this.destroyPlaybackResilience();
         this.generation += 1;
         this.abortController?.abort();
         this.demuxer?.delete();
@@ -484,7 +525,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!this.workerReady || this.destroyed) return;
         this.rejectLayerSwitch(new DOMException('TLV playback was restarted.', 'AbortError'));
         const generation = ++this.generation;
-        this.resetPlaybackDamage();
+        this.destroyPlaybackResilience();
         this.abortController?.abort();
         const controller = new AbortController();
         this.abortController = controller;
@@ -518,7 +559,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     this.presentationStartUs = presentation.presentationStartUs;
                     this.presentationEndUs = presentation.presentationEndUs;
                     this.presentationStartVideoPacketId = presentation.selectedVideoPacketId;
-                    this.damageRecovery.setPresentationStartUs(this.presentationStartUs);
                 }
             }
             if (generation !== this.generation) return;
@@ -549,9 +589,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         // present or remote playback is explicitly disabled. Raw TLV has no
         // native AirPlay source, so opt out before attaching the object URL.
         if (BrowserManagedMediaSource && mediaSource instanceof BrowserManagedMediaSource) {
-            this.bridge.video.disableRemotePlayback = true;
+            this.media.disableRemotePlayback = true;
         }
-        this.bridge.video.src = this.mediaUrl;
+        this.media.src = this.mediaUrl;
         await opened;
     }
 
@@ -563,22 +603,21 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         let seekSession: MseRecordedSeekSession | null = null;
         const active = (): boolean => generation === this.generation && !this.destroyed;
         const entryKind = tlvPlaybackEntryKind(this.bridge.live, startTimeSeconds);
-        const pipeline = createMseOutputPipeline({
+        this.msePipeline = createMseOutputPipeline({
             mediaSource: this.mediaSource!,
-            media: this.bridge.video,
+            media: this.media,
             queues: this.queueByType,
             freshRecordedEntryAlignment: entryKind === 'startup',
             recordedPresentationStartUs: this.bridge.live ? null : this.presentationStartUs,
             onUpdateEnd: () => this.handleQueueUpdate(),
             onQueueCreated: () => this.handleQueueUpdate(),
-            forceReinitialize: () => this.layerSwitchPending !== null,
             queueOptions: {
                 backBufferSeconds: this.bridge.options.backBufferSeconds ?? (this.bridge.live ? 45 : 8),
                 forwardBufferHighSeconds: this.bridge.options.forwardBufferSeconds ?? (this.bridge.live ? 8 : 15),
             },
         });
-        const flowControl = createMsePlaybackFlowControl({
-            media: this.bridge.video,
+        this.playbackFlow = createMsePlaybackFlowControl({
+            media: this.media,
             queues: this.queueByType,
             entryKind,
             entryTimeSeconds: startTimeSeconds,
@@ -589,6 +628,20 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
 
         const initialVideoPacketId = this.preferredVideoPacketId ?? this.presentationStartVideoPacketId;
+        let offset = 0n;
+        let demuxer: Demuxer;
+        let demuxTail: Promise<void> = Promise.resolve();
+        const withDemuxer = async <T>(operation: () => Promise<T>): Promise<T> => {
+            const previous = demuxTail;
+            let release!: () => void;
+            demuxTail = new Promise<void>(resolve => { release = resolve; });
+            await previous;
+            try {
+                return await operation();
+            } finally {
+                release();
+            }
+        };
         const callbacks: createTlvDemuxModule.TlvDemuxOptions = {
             onMseVideoProperties: properties => {
                 if (!active()) return;
@@ -605,19 +658,32 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onMseInit: init => {
                 if (!active()) return;
                 try {
-                    pipeline.onMseInit(init as unknown as Parameters<MseOutputPipeline['onMseInit']>[0]);
+                    this.liveTransition?.observeInit(init as unknown as Parameters<
+                        MseLiveTransitionManager['observeInit']
+                    >[0]);
+                    this.msePipeline!.onMseInit(
+                        init as unknown as Parameters<MseOutputPipeline['onMseInit']>[0],
+                    );
                 } catch (error) { callbackError = error; }
             },
             onMseSegment: segment => {
                 if (!active()) return;
                 try {
-                    pipeline.onMseSegment(segment as unknown as Parameters<MseOutputPipeline['onMseSegment']>[0]);
+                    this.liveTransition?.observeSegment(segment as unknown as Parameters<
+                        MseLiveTransitionManager['observeSegment']
+                    >[0]);
+                    this.msePipeline!.onMseSegment(
+                        segment as unknown as Parameters<MseOutputPipeline['onMseSegment']>[0],
+                    );
                 } catch (error) { callbackError = error; }
             },
             onMseVideoSplice: splice => {
                 if (!active()) return;
                 try {
-                    pipeline.onMseVideoSplice(
+                    this.liveTransition?.observeSplice('video', splice as unknown as Parameters<
+                        MseLiveTransitionManager['observeSplice']
+                    >[1]);
+                    this.msePipeline!.onMseVideoSplice(
                         splice as unknown as Parameters<MseOutputPipeline['onMseVideoSplice']>[0],
                     );
                 } catch (error) {
@@ -629,7 +695,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onMseAudioSplice: splice => {
                 if (!active()) return;
                 try {
-                    pipeline.onMseAudioSplice(
+                    this.liveTransition?.observeSplice('audio', splice as unknown as Parameters<
+                        MseLiveTransitionManager['observeSplice']
+                    >[1]);
+                    this.msePipeline!.onMseAudioSplice(
                         splice as unknown as Parameters<MseOutputPipeline['onMseAudioSplice']>[0],
                     );
                 } catch (error) {
@@ -640,7 +709,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             },
             onMseLayerSwitch: layer => {
                 if (!active()) return;
-                this.resetPlaybackDamage();
+                this.resilience?.notifyTrackSwitch(generation);
                 const pending = this.layerSwitchPending;
                 const matchesPending = pending?.demuxer === demuxer && pending.generation === generation &&
                     pending.videoTrack.trackId === layer.videoTrackId &&
@@ -727,11 +796,17 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             onPlaybackDamage: damage => {
                 if (!active()) return;
                 this.bridge.emit('tlv_playback_damage', damage);
-                this.handlePlaybackDamage(damage);
+                this.resilience?.reportDamage(damage as unknown as Record<string, unknown>);
+            },
+            onMseVideoRecovery: event => {
+                if (active()) this.resilience?.observeVideoRecoveryEvent(event);
             },
             onPlaybackAccessUnitView: unit => {
                 if (!active()) return;
                 try {
+                    this.resilience?.observeAccessUnit(unit as unknown as Parameters<
+                        MsePlaybackResilienceController['observeAccessUnit']
+                    >[0]);
                     seekSession?.observeAccessUnit(
                         unit as unknown as Parameters<MseRecordedSeekSession['observeAccessUnit']>[0],
                     );
@@ -836,7 +911,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 }
             },
         };
-        const demuxer = new this.worker!.TlvDemuxer(callbacks, {
+        demuxer = new this.worker!.TlvDemuxer(callbacks, {
             videoPacketId: initialVideoPacketId,
             audioPacketId: this.preferredAudioPacketId,
             subtitlePacketId: this.preferredSubtitlePacketId,
@@ -845,6 +920,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         });
         this.demuxer = demuxer;
         await demuxer.initialized();
+        this.installPlaybackResilience({
+            generation,
+            callbacks,
+            recordedSource,
+            getDemuxer: () => demuxer,
+            adoptDemuxer: adopted => { demuxer = adopted; },
+            setOffset: value => { offset = value; },
+            withDemuxer,
+            active,
+        });
         // Apply host display state before the first media initialization is
         // emitted, so Auto can preserve HDR signalling for a real HDR sink.
         if (this.pendingOutputEdid) await demuxer.setMseEdid(this.pendingOutputEdid.slice());
@@ -862,7 +947,6 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (!this.bridge.live) await demuxer.setMseTimestampOffset(-this.presentationStartUs);
         if (!this.bridge.live) await demuxer.startIndex(false);
 
-        let offset = 0n;
         if (!this.bridge.live && startTimeSeconds > 0 && recordedSource && this.durationUs !== null) {
             seekSession = createMseRecordedSeekSession({
                 targetTimeSeconds: startTimeSeconds,
@@ -871,9 +955,9 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 presentationStartUs: this.presentationStartUs,
                 presentationEndUs: this.presentationEndUs ?? this.presentationStartUs + this.durationUs,
                 demuxer,
-                media: this.bridge.video,
+                media: this.dynamicMedia,
                 queues: this.queueByType,
-                flowControl,
+                flowControl: this.playbackFlow,
                 signal,
                 isActive: active,
                 headReady: () => this.selectedTrackIds.has('video'),
@@ -915,12 +999,12 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     }
                 },
                 beforeLanding: () => {
-                    pipeline.clearPendingMedia();
+                    this.msePipeline!.clearPendingMedia();
                     this.renderer?.reset();
                     discardPlaybackData = false;
-                    this.bridge.video.currentTime = startTimeSeconds;
+                    this.media.currentTime = startTimeSeconds;
                 },
-                waitForAppends: () => pipeline.waitStable(),
+                waitForAppends: () => this.msePipeline!.waitStable(),
                 checkError: () => { if (callbackError) throw callbackError; },
             });
             const result = await seekSession.run();
@@ -939,35 +1023,47 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                 maxDelayMilliseconds: LIVE_CHUNK_MAX_DELAY_MILLISECONDS,
             })) {
                 if (generation !== this.generation) break;
-                await demuxer.setMsePlaybackPosition(
-                    BigInt(Math.round(this.bridge.video.currentTime * 1000000)),
-                );
-                if (!await demuxer.push(data)) throw new Error('TLV live demux failed.');
+                const pushed = await withDemuxer(async () => {
+                    await demuxer.setMsePlaybackPosition(
+                        BigInt(Math.round(this.media.currentTime * 1000000)),
+                    );
+                    return demuxer.push(data);
+                });
+                if (!pushed) {
+                    throw new Error('TLV live demux failed.');
+                }
                 if (callbackError) throw callbackError;
-                await flowControl.afterPush(data.byteLength, active);
+                await this.playbackFlow!.afterPush(data.byteLength, active);
             }
         } else if (recordedSource) {
             while (offset < recordedSource.size && generation === this.generation) {
-                const size = recordedSource.size - offset < CHUNK_SIZE ? recordedSource.size - offset : CHUNK_SIZE;
-                const data = await recordedSource.read(offset, size);
-                await demuxer.setMsePlaybackPosition(
-                    BigInt(Math.round(this.bridge.video.currentTime * 1000000)),
-                );
-                if (!await demuxer.push(data)) {
-                    throw new Error(`TLV demux failed at ${offset}.`);
+                const pushed = await withDemuxer(async () => {
+                    const currentOffset = offset;
+                    const size = recordedSource.size - currentOffset < CHUNK_SIZE
+                        ? recordedSource.size - currentOffset : CHUNK_SIZE;
+                    const data = await recordedSource.read(currentOffset, size);
+                    await demuxer.setMsePlaybackPosition(
+                        BigInt(Math.round(this.media.currentTime * 1000000)),
+                    );
+                    const accepted = await demuxer.push(data);
+                    if (accepted) offset = currentOffset + size;
+                    return {accepted, byteLength: data.byteLength, currentOffset};
+                });
+                if (!pushed.accepted) {
+                    throw new Error(`TLV demux failed at ${pushed.currentOffset}.`);
                 }
-                offset += size;
                 if (callbackError) throw callbackError;
-                await flowControl.afterPush(data.byteLength, active);
+                await this.playbackFlow!.afterPush(pushed.byteLength, active);
             }
         }
         if (generation !== this.generation) return;
-        await demuxer.flush();
+        await withDemuxer(() => demuxer.flush());
         if (this.layerSwitchPending?.demuxer === demuxer) {
             this.rejectLayerSwitch(new Error('The input ended before the A/V layer switch completed.'));
         }
-        if (!this.bridge.live) await demuxer.finalizeIndex();
-        await pipeline.finalize({truncateToCommonEnd: !this.bridge.live && incompleteInputTail});
+        if (!this.bridge.live) await withDemuxer(() => demuxer.finalizeIndex());
+        this.resilience?.notifySourceEnded();
+        await this.msePipeline!.finalize({truncateToCommonEnd: !this.bridge.live && incompleteInputTail});
     }
 
     private openRecordedSource(signal: AbortSignal): Promise<RecordedSource> {
@@ -1000,7 +1096,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             previous: this.renderer,
             previousOverlay: this.subtitleOverlay,
             mediaPlane: this.bridge.mediaPlane,
-            media: this.bridge.video,
+            media: this.media,
             live: this.bridge.live,
             visible: this.bridge.subtitleVisible(),
             rendererOptions: this.bridge.subtitleOptions,
@@ -1030,12 +1126,14 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     private maybeStartPlayback(): void {
-        if (this.playingStarted || this.queueByType.size < 2) return;
+        const requiredTracks = this.requiredTracks();
+        if (this.playingStarted || !requiredTracks.every(type => this.queueByType.has(type))) return;
         const started = startMsePlayback({
-            media: this.bridge.video,
+            media: this.dynamicMedia,
             queues: this.queueByType,
             liveMode: this.bridge.live,
             minimumLiveBufferSeconds: 0.5,
+            requiredTracks,
         });
         if (!started) return;
         this.playingStarted = true;
@@ -1044,23 +1142,265 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
 
     private handleQueueUpdate(): void {
         this.maybeStartPlayback();
-        this.damageRecovery.update();
+        this.resilience?.notifyBufferedChange();
     }
 
-    private handlePlaybackDamage(damage: createTlvDemuxModule.PlaybackDamage): void {
-        const key = `${damage.videoTrackId}:${damage.startInputOffset}:${damage.endInputOffset}`;
-        if (this.reportedDamage.has(key)) return;
-        this.reportedDamage.add(key);
-        if (damage.severity !== 'severe') return;
+    private requiredTracks(): readonly ('video' | 'audio')[] {
+        return this.msePipeline?.requiredTracks ?? ['video', 'audio'];
+    }
 
-        if (damage.action === 'seek' && damage.recoveryTimeUs !== null) {
-            this.damageRecovery.reportDamage(damage);
+    private setRequiredTracks(required: readonly ('video' | 'audio')[]): void {
+        applyTLVRequiredTracks({
+            pipeline: this.msePipeline,
+            flow: this.playbackFlow,
+            required,
+            currentTime: this.media.currentTime,
+            restartPlayback: () => {
+                this.playingStarted = false;
+                this.maybeStartPlayback();
+            },
+        });
+    }
+
+    private bindMediaLifecycle(media: HTMLVideoElement): void {
+        media.addEventListener('waiting', this.waitingListener);
+        media.addEventListener('pause', this.pauseListener);
+        media.addEventListener('play', this.playListener);
+    }
+
+    private unbindMediaLifecycle(media: HTMLVideoElement): void {
+        media.removeEventListener('waiting', this.waitingListener);
+        media.removeEventListener('pause', this.pauseListener);
+        media.removeEventListener('play', this.playListener);
+    }
+
+    private destroyPlaybackResilience(): void {
+        this.resilience?.destroy();
+        this.resilience = null;
+        this.liveTransition?.destroy();
+        this.liveTransition = null;
+        this.recordedTransition?.destroy();
+        this.recordedTransition = null;
+        this.transitionFactory = null;
+        this.msePipeline = null;
+        this.playbackFlow = null;
+    }
+
+    private installPlaybackResilience(options: {
+        generation: number;
+        callbacks: createTlvDemuxModule.TlvDemuxOptions;
+        recordedSource: RecordedSource | null;
+        getDemuxer: () => WorkerDemuxer;
+        adoptDemuxer: (demuxer: WorkerDemuxer) => void;
+        setOffset: (offset: bigint) => void;
+        withDemuxer: <T>(operation: () => Promise<T>) => Promise<T>;
+        active: () => boolean;
+    }): void {
+        const queueOptions = {
+            backBufferSeconds: this.bridge.options.backBufferSeconds ?? (this.bridge.live ? 45 : 8),
+            forwardBufferHighSeconds: this.bridge.options.forwardBufferSeconds ?? (this.bridge.live ? 8 : 15),
+        };
+        const commit = async (candidate: TransitionCandidate): Promise<void> => {
+            if (!options.active()) throw new DOMException('Transition superseded.', 'AbortError');
+            const previousMedia = this.media;
+            const previousUrl = this.mediaUrl;
+            const previousQueues = this.queueByType;
+            if (previousMedia.paused) throw new DOMException('Transition paused by the user.', 'AbortError');
+            if (!this.bridge.canRebindMedia(previousMedia)) {
+                throw new Error('TLV candidate tried to replace a stale media element.');
+            }
+            let promoted: HTMLVideoElement | null = null;
+            let previousDemuxer: WorkerDemuxer | null = null;
+            const rollbackPromotion = (): void => {
+                if (!promoted) return;
+                restoreTLVMedia(previousMedia, promoted, (media, candidateMedia) => {
+                    this.bridge.restoreMedia(media, candidateMedia);
+                    this.unbindMediaLifecycle(candidateMedia);
+                    this.media = media;
+                    this.bridge.video = media;
+                    this.bindMediaLifecycle(media);
+                });
+                this.hlgSdrRenderer.setVideoElement(previousMedia);
+                this.createSubtitleRenderer();
+                promoted = null;
+            };
+            try {
+                promoted = promoteTLVMedia(previousMedia, candidate.probeMedia, (media, previous) => {
+                    this.bridge.rebindMedia(media, previous);
+                    this.unbindMediaLifecycle(previous);
+                    this.media = media;
+                    this.bridge.video = media;
+                    this.bindMediaLifecycle(media);
+                });
+                this.hlgSdrRenderer.setVideoElement(promoted);
+                this.createSubtitleRenderer();
+                if (!options.active() || promoted.paused) {
+                    throw new DOMException('Transition paused or superseded during commit.', 'AbortError');
+                }
+            } catch (error) {
+                rollbackPromotion();
+                throw error;
+            }
+            try {
+                if (candidate.prepareDemuxerAdoption) {
+                    previousDemuxer = await options.withDemuxer(async () => {
+                        if (!options.active() || promoted!.paused) {
+                            throw new DOMException('Transition paused or superseded during commit.', 'AbortError');
+                        }
+                        const adopted = adoptRecordedTLVDemuxer({
+                            current: options.getDemuxer,
+                            candidate: candidate.prepareDemuxerAdoption!,
+                            callbacks: options.callbacks,
+                            nextOffset: candidate.seekResult!.nextOffset,
+                            adopt: options.adoptDemuxer,
+                            setOffset: options.setOffset,
+                        });
+                        this.demuxer = adopted.adopted;
+                        return adopted.previous;
+                    });
+                }
+            } catch (error) {
+                rollbackPromotion();
+                throw error;
+            }
+            // From here onward the candidate is authoritative. No exception may
+            // escape and make the SDK discard an already-promoted candidate.
+            this.mediaSource = candidate.mediaSource;
+            this.mediaUrl = candidate.url;
+            this.queueByType = candidate.queues as Map<string, MseAppendQueue>;
+            this.msePipeline = candidate.pipeline as MseOutputPipeline;
+            this.playbackFlow = candidate.flow as MsePlaybackFlowControl;
+            for (const queue of this.queueByType.values()) {
+                queue.onUpdateEnd = () => this.handleQueueUpdate();
+            }
+            this.playingStarted = true;
+            try {
+                this.resilience?.notifyMediaElementChanged();
+                this.resilience?.notifyPlaybackResumed();
+                this.liveTransition?.notifyPlaybackResumed();
+                this.recordedTransition?.notifyPlaybackResumed();
+            } catch (error) {
+                try { this.fail(error); } catch { /* Candidate is already authoritative. */ }
+            }
+            try { previousDemuxer?.delete(); } catch (error) {
+                try { this.fail(error); } catch { /* Candidate is already authoritative. */ }
+            }
+            for (const queue of previousQueues.values()) {
+                try { queue.destroy(); } catch (error) {
+                    try { this.fail(error); } catch { /* Candidate is already authoritative. */ }
+                }
+            }
+            try {
+                previousMedia.pause();
+                previousMedia.removeAttribute('src');
+                previousMedia.load();
+                if (previousUrl) URL.revokeObjectURL(previousUrl);
+            } catch (error) {
+                try { this.fail(error); } catch { /* Candidate is already authoritative. */ }
+            }
+        };
+        this.transitionFactory = () => {
+            if (this.bridge.live) {
+                this.liveTransition = createLiveMseTransitionManager({
+                    MediaSourceClass: BrowserMediaSource,
+                    media: this.dynamicMedia,
+                    queueOptions,
+                    isActive: options.active,
+                    openMediaSource: openDetachedTLVMediaSource,
+                    commit,
+                    appendLog: () => undefined,
+                });
+            } else if (options.recordedSource && this.durationUs !== null && this.presentationEndUs !== null) {
+                this.recordedTransition = createRecordedTLVTransitionManager({
+                    worker: this.worker!,
+                    MediaSourceClass: BrowserMediaSource,
+                    source: options.recordedSource,
+                    durationSeconds: Number(this.durationUs) / 1000000,
+                    durationUs: this.durationUs,
+                    presentationStartUs: this.presentationStartUs,
+                    presentationEndUs: this.presentationEndUs,
+                    media: this.dynamicMedia,
+                    queueOptions,
+                    isActive: options.active,
+                    openMediaSource: openDetachedTLVMediaSource,
+                    commit,
+                    selectedVideoTrackId: () => this.selectedTrackIds.get('video') ?? null,
+                    selectedAudioTrackId: () => this.selectedTrackIds.get('audio') ?? null,
+                    selectedVideoPacketId: () => this.trackById(this.selectedTrackIds.get('video'))?.packetId ?? null,
+                    selectedAudioPacketId: () => this.trackById(this.selectedTrackIds.get('audio'))?.packetId ?? null,
+                    toneMappingMode: () => this.effectiveToneMappingMode(),
+                    estimateOffset: (targetUs, sourceSize) =>
+                        options.getDemuxer().estimateOffset(targetUs, sourceSize),
+                });
+            }
+        };
+        this.transitionFactory();
+        this.resilience = createMsePlaybackResilienceController({
+            media: this.dynamicMedia,
+            presentationStartUs: this.presentationStartUs,
+            generation: options.generation,
+            isActive: options.active,
+            isCurrentLayer: damage => damage.videoTrackId === this.selectedTrackIds.get('video'),
+            switchInFlight: () => this.layerSwitchPending !== null,
+            isTargetBuffered: target => this.requiredTracks().every(type =>
+                this.queueByType.get(type)?.bufferedRanges().some(range =>
+                    range.start <= target + 0.05 && range.end >= target + 0.5) ?? false),
+            seek: target => { this.media.currentTime = target; },
+            onModeChange: event => {
+                if (event.mode === MsePlaybackMode.AUDIO_VIDEO) {
+                    this.setRequiredTracks(['video', 'audio']);
+                }
+                this.bridge.emit('tlv_playback_mode', event);
+            },
+            onAudioOnlyRequested: () => this.requestAudioOnlyTransition(),
+            onVideoRestoreRequested: event => this.requestVideoRestore(event),
+            onVideoRestored: () => this.setRequiredTracks(['video', 'audio']),
+        });
+    }
+
+    private cancelPlaybackTransition(): void {
+        this.liveTransition?.destroy();
+        this.recordedTransition?.destroy();
+        this.liveTransition = null;
+        this.recordedTransition = null;
+        this.transitionFactory?.();
+    }
+
+    private async requestAudioOnlyTransition(): Promise<void> {
+        const videoQueue = this.queueByType.get('video');
+        const manager = this.bridge.live ? this.liveTransition : this.recordedTransition;
+        await requestTLVAudioOnlyTransition({
+            setRequiredTracks: required => this.setRequiredTracks(required),
+            activateInPlace: () => setMseVideoTrackActive({
+                mediaSource: this.mediaSource!,
+                active: false,
+                videoSourceBuffer: videoQueue?.sourceBuffer ?? null,
+            }),
+            currentMode: () => this.resilience?.mode ?? null,
+            transition: manager ? (mode, target) => manager.transition(mode, target) : null,
+            currentTime: () => this.media.currentTime,
+        });
+    }
+
+    private async requestVideoRestore(event: MsePlaybackModeChange): Promise<void> {
+        if (event.mode !== MsePlaybackMode.RESTORING_VIDEO) return;
+        this.setRequiredTracks(['video', 'audio']);
+        const videoQueue = this.queueByType.get('video');
+        const result = await setMseVideoTrackActive({
+            mediaSource: this.mediaSource!,
+            active: true,
+            videoSourceBuffer: videoQueue?.sourceBuffer ?? null,
+        });
+        if (!this.resilience || this.resilience.mode !== MsePlaybackMode.RESTORING_VIDEO || result.changed) return;
+        const manager = this.bridge.live ? this.liveTransition : this.recordedTransition;
+        try {
+            const restored = await manager?.transition(MsePlaybackMode.RESTORING_VIDEO, event.target);
+            if (restored?.presentedTime !== null && restored?.presentedTime !== undefined) {
+                this.resilience?.observePresentedFrame(restored.presentedTime);
+            }
+        } catch {
+            this.resilience?.notifyVideoRestoreFailed(event.target);
         }
-    }
-
-    private resetPlaybackDamage(): void {
-        this.damageRecovery.reset();
-        this.reportedDamage.clear();
     }
 
     private isMseCompatibleAudioTrack(track: DPlayerType.TLVTrackInfo): boolean {
@@ -1097,12 +1437,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         if (this.mediaUrl) URL.revokeObjectURL(this.mediaUrl);
         this.mediaUrl = null;
         this.mediaSource = null;
-        this.bridge.video.removeAttribute('src');
-        this.bridge.video.load();
+        this.media.removeAttribute('src');
+        this.media.load();
     }
 
     private trackByPacket(kind: createTlvDemuxModule.TrackKind, packetId: number): DPlayerType.TLVTrackInfo | undefined {
         return this.tracks.find(track => track.kind === kind && track.packetId === packetId);
+    }
+
+    private trackById(trackId: bigint | undefined): DPlayerType.TLVTrackInfo | undefined {
+        return trackId === undefined ? undefined : this.tracks.find(track => track.trackId === trackId);
     }
 
     private fail(error: unknown): void {

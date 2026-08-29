@@ -6,8 +6,10 @@ export default class HlgSdrPlayerRenderer {
     private readonly webGlCanvas = document.createElement('canvas');
     private readonly renderer: HlgSdrRenderer;
     private readonly layoutObserver: MutationObserver;
+    private video: HTMLVideoElement;
 
     constructor(video: HTMLVideoElement, mediaPlane: HTMLElement) {
+        this.video = video;
         for (const canvas of [this.webGpuCanvas, this.webGlCanvas]) {
             canvas.className = 'dplayer-hlg-sdr-canvas';
             canvas.setAttribute('aria-hidden', 'true');
@@ -28,7 +30,18 @@ export default class HlgSdrPlayerRenderer {
             webGlCanvas: this.webGlCanvas,
             onError: (backend, error) => console.warn(`[DPlayer] HLG-SDR ${backend} unavailable:`, error),
         });
-        this.layoutObserver = new MutationObserver(() => this.syncLayout(video));
+        this.layoutObserver = new MutationObserver(() => this.syncLayout(this.video));
+        this.layoutObserver.observe(video, {attributes: true, attributeFilter: ['style']});
+        this.syncLayout(video);
+    }
+
+    setVideoElement(video: HTMLVideoElement): void {
+        if (this.video === video) return;
+        this.layoutObserver.disconnect();
+        this.video = video;
+        (this.renderer as HlgSdrRenderer & {
+            setVideoElement(media: HTMLVideoElement): void;
+        }).setVideoElement(video);
         this.layoutObserver.observe(video, {attributes: true, attributeFilter: ['style']});
         this.syncLayout(video);
     }

@@ -366,6 +366,7 @@ Player events
 -   subtitle_hide
 -   subtitle_change
 -   tlv_playback_damage — complete `TLVPlaybackDamage` payload for TLV source damage
+-   tlv_playback_mode — complete `TLVPlaybackModeChange` payload for A/V recovery, audio-only continuity, and video restoration
 
 ## Quality switching
 

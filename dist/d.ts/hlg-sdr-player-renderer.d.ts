@@ -4,7 +4,9 @@ export default class HlgSdrPlayerRenderer {
     private readonly webGlCanvas;
     private readonly renderer;
     private readonly layoutObserver;
+    private video;
     constructor(video: HTMLVideoElement, mediaPlane: HTMLElement);
+    setVideoElement(video: HTMLVideoElement): void;
     setColorLut(lut: createTlvDemuxModule.HlgSdrColorLut): void;
     setComparisonEnabled(enabled: boolean): void;
     setEnabled(enabled: boolean): void;

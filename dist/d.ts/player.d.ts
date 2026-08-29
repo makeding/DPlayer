@@ -126,6 +126,7 @@ declare class DPlayer {
     initDanmaku(danmakuAPI?: DPlayerType.Danmaku | boolean, apiBackend?: DPlayerType.APIBackend): void;
     initMSE(video: HTMLVideoElement, type: DPlayerType.VideoType | string): void;
     initVideo(video: HTMLVideoElement, type: DPlayerType.VideoType | string): void;
+    private bindVideoEventForwarding;
     /**
      * Apply one of DPlayer's two broadcast audio choices to the active media backend
      * @param audio Audio channel selected by the viewer

@@ -847,6 +847,22 @@ class DPlayer {
                         subtitleOptions: this.options.pluginOptions.aribb62,
                         subtitleVisible: () => this.user.get('subtitle') !== 0 &&
                             !this.template.subtitle.classList.contains('dplayer-subtitle-hide'),
+                        canRebindMedia: previous => this.video === previous,
+                        rebindMedia: candidate => {
+                            // TLVPlayer validates the current element before promotion, so this
+                            // callback is the non-throwing half of the atomic commit boundary.
+                            this.video = candidate;
+                            this.template.video = candidate;
+                            this.infoPanel.video = candidate;
+                            if (this.subtitle) this.subtitle.video = candidate;
+                            this.bindVideoEventForwarding(candidate);
+                        },
+                        restoreMedia: previous => {
+                            this.video = previous;
+                            this.template.video = previous;
+                            this.infoPanel.video = previous;
+                            if (this.subtitle) this.subtitle.video = previous;
+                        },
                         invalidateQualitySnapshot: () => this.tlvQuality?.invalidateSnapshot(),
                         emit: (name, detail) => {
                             if (name === 'tlv_tracks') {
@@ -1108,15 +1124,16 @@ class DPlayer {
         // show video time: the metadata has loaded or changed
         this.on('durationchange', () => {
             // compatibility: Android browsers will output 1 or Infinity at first
-            if (video.duration !== 1 && video.duration !== Infinity) {
-                this.template.dtime.textContent = utils.secondToTime(video.duration);
+            if (this.video.duration !== 1 && this.video.duration !== Infinity) {
+                this.template.dtime.textContent = utils.secondToTime(this.video.duration);
             }
         });
 
         // show video loaded bar: to inform interested parties of progress downloading the media
         this.on('progress', () => {
             const duration = utils.getVideoDuration(this.video, this.template);
-            const percentage = video.buffered.length ? video.buffered.end(video.buffered.length - 1) / duration : 0;
+            const percentage = this.video.buffered.length ?
+                this.video.buffered.end(this.video.buffered.length - 1) / duration : 0;
             this.bar.set('loaded', percentage, 'width');
         });
 
@@ -1177,11 +1194,7 @@ class DPlayer {
             }
         });
 
-        for (let i = 0; i < this.events.videoEvents.length; i++) {
-            video.addEventListener(this.events.videoEvents[i], (event) => {
-                this.events.trigger(this.events.videoEvents[i], event);
-            });
-        }
+        this.bindVideoEventForwarding(video);
 
         // restore volume setting from LocalStorage
         this.volume(this.user.get('volume'), true, true);
@@ -1197,6 +1210,14 @@ class DPlayer {
             if (!this.user.get('subtitle')) {
                 this.subtitle.hide();
             }
+        }
+    }
+
+    private bindVideoEventForwarding(video: HTMLVideoElement): void {
+        for (const name of this.events.videoEvents) {
+            video.addEventListener(name, event => {
+                if (video === this.video) this.events.trigger(name, event);
+            });
         }
     }
 

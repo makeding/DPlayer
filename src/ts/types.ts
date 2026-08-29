@@ -72,6 +72,7 @@ export type PlayerEvents =
     'tlv_ready' |
     'tlv_error' |
     'tlv_playback_damage' |
+    'tlv_playback_mode' |
     'tlv_tracks' |
     'tlv_track_change' |
     'tlv_layer_change' |
@@ -397,6 +398,7 @@ export interface TLVOptions {
 
 export type TLVTrackInfo = createTlvDemuxModule.TrackInfo;
 export type TLVPlaybackDamage = createTlvDemuxModule.PlaybackDamage;
+export type TLVPlaybackModeChange = import('tlvdemux/mse-playback').MsePlaybackModeChange;
 export type TLVMptSnapshot = createTlvDemuxModule.MptSnapshot;
 export type TLVVideoProperties = createTlvDemuxModule.MseVideoProperties;
 export interface TLVOutputState {

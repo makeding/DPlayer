@@ -350,6 +350,7 @@ dp.on('ended', function () {
 -   subtitle_hide
 -   subtitle_change
 -   tlv_playback_damage — TLV 源损伤的完整 `TLVPlaybackDamage` 数据
+-   tlv_playback_mode — A/V 恢复、纯音频连续播放与视频恢复的完整 `TLVPlaybackModeChange` 数据
 
 ## 清晰度切换
 

@@ -2,7 +2,7 @@
 
 ## Browser SDK ownership
 
-For `tlvdemux >= 0.3.3`, protocol and playback lifecycle behavior is owned by
+For `tlvdemux >= 0.3.5`, protocol and playback lifecycle behavior is owned by
 the public browser SDK. DPlayer must consume the SDK's MSE output pipeline,
 recorded-source and 16 MiB recorded-seek coordinator, track/layer selection,
 live input coalescing, playback-damage recovery, and Worker client/runtime.
@@ -47,15 +47,46 @@ exactly once.
 Before every sequential push, DPlayer reports the unchanged HTML media clock
 through `setMsePlaybackPosition`. Parser prefetch may retain a future damage
 authorization, but it cannot seek over healthy media before playback reaches
-the damaged span. Automatic recovery remains selected-layer-only, waits for a
-real media `waiting` event plus 0.5 seconds of common buffered A/V at the mapped
-recovery point, and executes once.
+the damaged span. DPlayer forwards selected-video access units,
+`onMseVideoRecovery`, visible-media `waiting`, buffer progress, presented-frame,
+pause, and resume observations to the SDK resilience controller. Recovery is
+selected-layer-only, moves strictly forward to an SDK-authorized RAP, never
+calls `play()` over a user pause, and never runs concurrently with a layer
+switch.
+
+After three authorized forward RAP attempts without a compositor-presented
+video frame, DPlayer enters the SDK's `audio-only` mode and emits the complete
+structured `tlv_playback_mode` event with stable code
+`TLV_VIDEO_UNAVAILABLE`. The active pipeline and flow-control required-track
+sets become audio-only, so missing video cannot block playback or accumulate an
+unbounded inactive output queue. A later selected-video RAP starts one bounded
+`restoring-video` transaction; video becomes active again only after the
+candidate frame at or beyond that RAP has actually been presented. Failed
+candidates leave the current audio playback untouched and wait for a later
+RAP.
+
+An in-place transition is accepted only when `activeSourceBuffers` confirms the
+requested video activation state. Otherwise recorded playback rebuilds through
+the public recorded-seek session and its single 16 MiB budget, while Live
+playback uses the public 4 MiB bounded transition manager and continues feeding
+the authoritative audio pipeline. Candidate MediaSources remain detached from
+the visible player until ready; commit promotes the already-attached candidate
+media element atomically and rebinds DPlayer events, subtitles, tone mapping,
+and the TLV media clock without changing the surrounding video-stage geometry.
+
+Explicit seek, video/layer selection, generation restart, source end, and
+destroy cancel any recovery transition and restore the normal A/V invariant.
+Recorded seeks inside damaged video retain the exact requested media time by
+using the SDK concealment target; DPlayer must not add a second reposition,
+scan, or read budget.
 
 For `video.type: "tlv"`, DPlayer consumes tlvdemux's `onPlaybackDamage`
 callback as the canonical source-damage signal.
 
 - Every callback is observable as `tlv_playback_damage` with the complete
   `TLVPlaybackDamage` payload and stable `TLV_SOURCE_DAMAGE` code.
+- Every SDK mode transition is observable as `tlv_playback_mode` with its
+  complete generation, mode, reason, target, attempted RAPs, and stable code.
 - A severe recovered interval is announced immediately, but receipt of the
   callback never moves playback by itself. DPlayer moves to the recovery point
   only after the media element emits `waiting`, the user is not paused or

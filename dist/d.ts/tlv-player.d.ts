@@ -10,6 +10,9 @@ type PlayerBridge = {
     options: DPlayerType.TLVOptions;
     subtitleOptions?: aribb62js.B62TTMLRendererOptions;
     subtitleVisible: () => boolean;
+    canRebindMedia: (previous: HTMLVideoElement) => boolean;
+    rebindMedia: (candidate: HTMLVideoElement, previous: HTMLVideoElement) => void;
+    restoreMedia: (previous: HTMLVideoElement, candidate: HTMLVideoElement) => void;
     invalidateQualitySnapshot: () => void;
     emit: (name: DPlayerType.PlayerEvents, detail?: unknown) => void;
 };
@@ -17,6 +20,7 @@ type PlayerBridge = {
 export default class TLVPlayer implements DPlayerType.TLVPlugin {
     readonly tracks: DPlayerType.TLVTrackInfo[];
     private readonly bridge;
+    private media;
     private worker;
     private workerRuntimeUrl;
     private workerReady;
@@ -55,9 +59,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private pendingOutputEdid;
     private pendingOutputConnected;
     private videoProperties;
-    private readonly damageRecovery;
-    private readonly reportedDamage;
+    private readonly dynamicMedia;
+    private msePipeline;
+    private playbackFlow;
+    private resilience;
+    private liveTransition;
+    private recordedTransition;
+    private transitionFactory;
     private readonly waitingListener;
+    private readonly pauseListener;
+    private readonly playListener;
     constructor(bridge: PlayerBridge);
     layerPair(tracks?: readonly DPlayerType.TLVTrackInfo[]): DPlayerType.TLVLayerPair | null;
     seek(time: number): Promise<void>;
@@ -91,13 +102,21 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private effectiveToneMappingMode;
     private maybeStartPlayback;
     private handleQueueUpdate;
-    private handlePlaybackDamage;
-    private resetPlaybackDamage;
+    private requiredTracks;
+    private setRequiredTracks;
+    private bindMediaLifecycle;
+    private unbindMediaLifecycle;
+    private destroyPlaybackResilience;
+    private installPlaybackResilience;
+    private cancelPlaybackTransition;
+    private requestAudioOnlyTransition;
+    private requestVideoRestore;
     private isMseCompatibleAudioTrack;
     private configureAutomaticLayerSwitch;
     private subtitleTrackKind;
     private releaseMediaSource;
     private trackByPacket;
+    private trackById;
     private fail;
     private rejectLayerSwitch;
 }

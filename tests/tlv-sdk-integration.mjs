@@ -10,10 +10,22 @@ import {
 
 const require = createRequire(import.meta.url);
 
-test('tlvdemux 0.3.3 live sources use the dedicated live playback entry', () => {
+test('tlvdemux 0.3.5 live sources use the dedicated live playback entry', () => {
     assert.equal(tlvPlaybackEntryKind(true, 0), 'live');
     assert.equal(tlvPlaybackEntryKind(false, 0), 'startup');
     assert.equal(tlvPlaybackEntryKind(false, 30), 'seek');
+});
+
+test('0.3.5 resilience consumer has no superseded pipeline option or legacy recovery adapter', () => {
+    const player = readFileSync(new URL('../src/ts/tlv-player.ts', import.meta.url), 'utf8');
+    assert.doesNotMatch(player, /forceReinitialize/);
+    assert.match(player, /createMsePlaybackResilienceController/);
+    assert.match(player, /onMseVideoRecovery/);
+    assert.match(player, /createLiveMseTransitionManager/);
+    assert.match(player, /createRecordedTLVTransitionManager/);
+    assert.match(player, /setMseVideoTrackActive/);
+    assert.match(player, /tlv_playback_mode/);
+    assert.doesNotMatch(player, /createTLVDamageRecovery|reportedDamage/);
 });
 
 test('manual layer selection before MSE entry delegates to the public entry switch', async () => {
