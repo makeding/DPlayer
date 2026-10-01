@@ -28,6 +28,19 @@ test('audio-only and restored A/V required tracks move pipeline and flow togethe
     ]);
 });
 
+test('explicit recorded seek locks its flow entry and required tracks through commit', () => {
+    const calls = [];
+    applyTLVRequiredTracks({
+        pipeline: {setRequiredTracks: value => calls.push(['pipeline', [...value]])},
+        flow: {setRequiredTracks: (value, time) => calls.push(['flow', [...value], time])},
+        required: ['video', 'audio'],
+        currentTime: 0,
+        entryLocked: true,
+        restartPlayback: () => calls.push(['restart']),
+    });
+    assert.deepEqual(calls, []);
+});
+
 test('rejected detached audio-only candidate never mutates the authoritative media session', async () => {
     const active = {
         media: {currentTime: 18},

@@ -23,6 +23,15 @@ selection must restore the healthy preferred paired A/V layer at the next
 usable RAP, including when the manual request was made before the initial
 playback entry.
 
+From the recorded-seek request until the SDK has formally committed exact
+selected-video and selected-audio coverage, the requested media clock and the
+normal A/V required-track set are locked. DPlayer must keep playback resilience
+inactive, must not let its initial or recovery mode callback rewrite the flow
+entry, and must not start the visible MediaElement from a partial earlier
+buffer. `currentTime` is installed exactly once after `seekSession.run()`
+succeeds and before normal playback and resilience resume. Failure leaves no
+partially installed clock or automatic recovery decision behind.
+
 Live playback uses the SDK's dedicated Live entry. Its first valid common A/V
 range may start after timestamp zero; DPlayer aligns the media clock only after
 the configured Live startup buffer is ready. A Live stream that never forms a

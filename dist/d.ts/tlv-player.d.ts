@@ -45,6 +45,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private suppressedSubtitleComponentTags;
     private destroyed;
     private playingStarted;
+    private recordedSeekActive;
     private pendingSeekTime;
     private audioSwitchPending;
     private audioSwitchError;

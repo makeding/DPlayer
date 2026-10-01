@@ -9,8 +9,10 @@ export function applyTLVRequiredTracks(options: {
     flow: {setRequiredTracks(required: readonly TLVRequiredTrack[], currentTime: number): void} | null;
     required: readonly TLVRequiredTrack[];
     currentTime: number;
+    entryLocked?: boolean;
     restartPlayback(): void;
 }): void {
+    if (options.entryLocked) return;
     options.pipeline?.setRequiredTracks(options.required);
     options.flow?.setRequiredTracks(options.required, options.currentTime);
     options.restartPlayback();

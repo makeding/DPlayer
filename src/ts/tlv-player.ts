@@ -133,6 +133,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     private suppressedSubtitleComponentTags = new Set<number>();
     private destroyed = false;
     private playingStarted = false;
+    private recordedSeekActive = false;
     private pendingSeekTime: number | null = null;
     private audioSwitchPending = false;
     private audioSwitchError: Error | null = null;
@@ -541,6 +542,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
         this.videoProperties = null;
         this.updateHlgSdrRenderer();
         this.playingStarted = false;
+        this.recordedSeekActive = !this.bridge.live && startTimeSeconds > 0;
         this.createSubtitleRenderer();
 
         try {
@@ -570,7 +572,10 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             }
             await this.consumeSource(startTimeSeconds, generation, controller.signal, recordedSource);
         } catch (error) {
-            if (!(error instanceof DOMException && error.name === 'AbortError') && generation === this.generation) this.fail(error);
+            if (generation === this.generation) {
+                this.recordedSeekActive = false;
+                if (!(error instanceof DOMException && error.name === 'AbortError')) this.fail(error);
+            }
         }
     }
 
@@ -1002,14 +1007,16 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
                     this.msePipeline!.clearPendingMedia();
                     this.renderer?.reset();
                     discardPlaybackData = false;
-                    this.media.currentTime = startTimeSeconds;
                 },
                 waitForAppends: () => this.msePipeline!.waitStable(),
                 checkError: () => { if (callbackError) throw callbackError; },
             });
             const result = await seekSession.run();
             offset = result.nextOffset;
+            this.media.currentTime = startTimeSeconds;
+            this.recordedSeekActive = false;
             seekSession = null;
+            this.maybeStartPlayback();
         } else {
             discardPlaybackData = false;
         }
@@ -1126,6 +1133,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
     }
 
     private maybeStartPlayback(): void {
+        if (this.recordedSeekActive) return;
         const requiredTracks = this.requiredTracks();
         if (this.playingStarted || !requiredTracks.every(type => this.queueByType.has(type))) return;
         const started = startMsePlayback({
@@ -1155,6 +1163,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             flow: this.playbackFlow,
             required,
             currentTime: this.media.currentTime,
+            entryLocked: this.recordedSeekActive,
             restartPlayback: () => {
                 this.playingStarted = false;
                 this.maybeStartPlayback();
@@ -1339,7 +1348,7 @@ export default class TLVPlayer implements DPlayerType.TLVPlugin {
             media: this.dynamicMedia,
             presentationStartUs: this.presentationStartUs,
             generation: options.generation,
-            isActive: options.active,
+            isActive: () => options.active() && !this.recordedSeekActive,
             isCurrentLayer: damage => damage.videoTrackId === this.selectedTrackIds.get('video'),
             switchInFlight: () => this.layerSwitchPending !== null,
             isTargetBuffered: target => this.requiredTracks().every(type =>

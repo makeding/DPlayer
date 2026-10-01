@@ -28,6 +28,24 @@ test('0.3.5 resilience consumer has no superseded pipeline option or legacy reco
     assert.doesNotMatch(player, /createTLVDamageRecovery|reportedDamage/);
 });
 
+test('explicit recorded seek owns the visible clock and playback start until formal commit', () => {
+    const player = readFileSync(new URL('../src/ts/tlv-player.ts', import.meta.url), 'utf8');
+    assert.match(player, /private recordedSeekActive = false/);
+    assert.match(player, /entryLocked: this\.recordedSeekActive/);
+    assert.match(player, /isActive: \(\) => options\.active\(\) && !this\.recordedSeekActive/);
+
+    const landing = player.slice(player.indexOf('beforeLanding: () => {'),
+        player.indexOf('waitForAppends:', player.indexOf('beforeLanding: () => {')));
+    assert.doesNotMatch(landing, /currentTime/);
+
+    const run = player.indexOf('const result = await seekSession.run();');
+    const clock = player.indexOf('this.media.currentTime = startTimeSeconds;', run);
+    const unlock = player.indexOf('this.recordedSeekActive = false;', clock);
+    const start = player.indexOf('this.maybeStartPlayback();', unlock);
+    assert.ok(run >= 0 && run < clock && clock < unlock && unlock < start,
+        'formal seek commit must precede clock install, unlock, and visible playback');
+});
+
 test('manual layer selection before MSE entry delegates to the public entry switch', async () => {
     const calls = [];
     const demuxer = {

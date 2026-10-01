@@ -11,6 +11,7 @@ export declare function applyTLVRequiredTracks(options: {
     } | null;
     required: readonly TLVRequiredTrack[];
     currentTime: number;
+    entryLocked?: boolean;
     restartPlayback(): void;
 }): void;
 /**
