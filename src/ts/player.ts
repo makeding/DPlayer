@@ -1308,6 +1308,7 @@ class DPlayer {
         if (!this.options.live) {
             this.seek(this.prevVideoCurrentTime);
         }
+        // Request playback in the quality-selection gesture to preserve autoplay permission
         if (!paused) {
             this.video.play();
         }
@@ -1328,14 +1329,17 @@ class DPlayer {
             }
         });
 
-        this.on('canplay', () => {
-            if (this.prevVideo !== null) {
-                if (!this.options.live && this.video.currentTime !== this.prevVideoCurrentTime) {
+        const onCanPlay = () => {
+            if (this.video === videoEle && this.prevVideo !== null) {
+                // Allow up to 50 ms for timestamp rounding and playback progress between seeked and canplay
+                // Keep restoring the position if the backend replaced the initial seek while loading
+                if (!this.options.live && Math.abs(this.video.currentTime - this.prevVideoCurrentTime) > 0.05) {
                     this.seek(this.prevVideoCurrentTime);
                     return;
                 }
                 this.prevVideo.remove();
                 this.video.classList.add('dplayer-video-current');
+                videoEle.removeEventListener('canplay', onCanPlay);
                 if (!paused) {
                     this.video.play();
                 }
@@ -1359,7 +1363,8 @@ class DPlayer {
                 this.container.classList.remove('dplayer-loading');
                 this.events.trigger('quality_end');
             }
-        });
+        };
+        videoEle.addEventListener('canplay', onCanPlay);
     }
 
     /**
