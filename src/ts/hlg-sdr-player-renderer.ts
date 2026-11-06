@@ -69,6 +69,9 @@ export default class HlgSdrPlayerRenderer {
         const externalPlane = video.style.position === 'absolute' &&
             video.style.width !== '' && video.style.height !== '';
         for (const canvas of [this.webGpuCanvas, this.webGlCanvas]) {
+            // Follow the external video plane when data broadcasting hides it.
+            // Keep the hidden attribute for selecting the active conversion backend.
+            canvas.style.visibility = externalPlane ? video.style.visibility : '';
             Object.assign(canvas.style, externalPlane ? {
                 inset: 'auto',
                 left: video.style.left,
