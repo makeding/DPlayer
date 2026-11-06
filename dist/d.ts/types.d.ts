@@ -583,10 +583,6 @@ export interface Plugins {
     webtorrent?: WebTorrent.Instance;
     aribb24Caption?: aribb24js.CanvasRenderer;
     aribb24Superimpose?: aribb24js.CanvasRenderer;
-    aribb62?: {
-        overlay: HTMLElement;
-        renderer: aribb62js.B62TTMLRenderer;
-    };
     tlv?: TLVPlugin;
 }
 export interface APIBackendReadOptions {
